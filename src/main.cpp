@@ -4,7 +4,18 @@
 #include <Arduino.h>
 #include <ArduinoLog.h>
 
+#if defined(ARDUINO_ARCH_ESP8266)
+#include <ESP8266WiFi.h>
+#else
+#include <WiFi.h>
+#endif
+
+#include <PubSubClient.h>
+#include <FS.h>
+
+
 // Sensor Libraries
+#include <Wire.h>
 #include "Adafruit_Si7021.h"
 #include "Adafruit_BME280.h"
 #include "Adafruit_TSL2561_U.h"
@@ -101,9 +112,23 @@ void setup_logging() {
   Log.verbose("Logging has started");
 }
 
+// read the config file and parse its data
+void setup_readconfig() {
+  SPIFFS.begin();
+  FILE f = SPIFFS.open("/config.ini","r");
+  if (!f) {
+    Log.error("Cannot open config file");
+    return;
+  }
+
+  f.close();
+  SPIFFS.end();
+}
+
 void setup() {
   setup_serial();
   setup_logging();
+  setup_readconfig();
   setup_i2c();
 }
 
