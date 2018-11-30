@@ -19,11 +19,22 @@
 #include "Adafruit_Si7021.h"
 #include "Adafruit_BME280.h"
 #include "Adafruit_TSL2561_U.h"
+#include <Adafruit_NeoPixel.h>
+
+// Global defines
+#define NEOPIXEL 14 //D5
+#define NROFLEDS 10
+
 
 // Global Objects
 Adafruit_Si7021 si7021;
 Adafruit_BME280 bme280;
 Adafruit_TSL2561_Unified tsl2561 = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT);
+Adafruit_NeoPixel led = Adafruit_NeoPixel(NROFLEDS, NEOPIXEL, NEO_GRB + NEO_KHZ800);
+
+// Strings for dynamic config
+String Smyname, Spass, Sssid, Smqttserver, Ssite, Slocation, Smqttuser, Smqttpass, Smqttport;
+
 
 // Flags for sensors found
 bool si7021_found = false;
@@ -32,6 +43,35 @@ bool tsl2561_found= false;
 bool voltage_found= true;
 bool rtc_init_done = false;
 bool rtc_alarm_raised = false;
+
+
+// LED routines
+void setled(byte r, byte g, byte b) {
+  led.setPixelColor(0, r, g, b);
+  led.show();
+}
+
+void setled(byte n, byte r, byte g, byte b) {
+  led.setPixelColor(n, r, g, b);
+  led.show();
+}
+
+void setled(byte n, byte r, byte g, byte b, byte show) {
+  led.setPixelColor(n, r, g, b);
+  if (show) {
+    led.show();
+  }
+}
+
+void setled(byte show) {
+  if (!show) {
+    int i;
+    for (i = 0; i < NROFLEDS; i++) {
+      setled(i, 0, 0, 0, 0);
+    }
+  }
+  led.show();
+}
 
 
 // Logging helper routines
@@ -112,10 +152,16 @@ void setup_logging() {
   Log.verbose("Logging has started");
 }
 
+// we assume there is always a LED connected
+void setup_led() {
+  led.begin();
+  led.show();
+}
+
 // read the config file and parse its data
 void setup_readconfig() {
   SPIFFS.begin();
-  FILE f = SPIFFS.open("/config.ini","r");
+  File f = SPIFFS.open("/config.ini","r");
   if (!f) {
     Log.error("Cannot open config file");
     return;
@@ -125,11 +171,30 @@ void setup_readconfig() {
   SPIFFS.end();
 }
 
+void setup_wifi() {
+  WiFi.persistent(false);
+  WiFi.disconnect();
+  delay(100);
+  WiFi.mode(WIFI_STA);
+  WiFi.hostname(Smyname);
+  WiFi.begin(Sssid.c_str(), Spass.c_str());
+}
+
+void setup_mqtt() {
+
+}
+
 void setup() {
   setup_serial();
+  setup_led();
+  setled(255,0,0);
   setup_logging();
   setup_readconfig();
   setup_i2c();
+  setup_wifi();
+  setled(255, 128, 0);
+  setup_mqtt();
+  setled(0, 255, 0);
 }
 
 void loop() {
