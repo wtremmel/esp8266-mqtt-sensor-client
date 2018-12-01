@@ -32,6 +32,8 @@ Adafruit_Si7021 si7021;
 Adafruit_BME280 bme280;
 Adafruit_TSL2561_Unified tsl2561 = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT);
 Adafruit_NeoPixel led = Adafruit_NeoPixel(NROFLEDS, NEOPIXEL, NEO_GRB + NEO_KHZ800);
+WiFiClient espClient;
+PubSubClient client;
 
 // Strings for dynamic config
 String Smyname, Spass, Sssid, Smqttserver, Ssite, Slocation, Smqttuser, Smqttpass;
@@ -98,6 +100,64 @@ void printTimestamp(Print* _logOutput) {
 
 void printNewline(Print* _logOutput) {
   _logOutput->print('\n');
+}
+
+// MQTT main callback routines
+void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
+
+  String in;
+  for (int i = 0; i < length; i++) {
+    in += String((char)payload[i]);
+  }
+  Log.verbose("Message arrived[%s]: %s ",topic,in.c_str());
+
+}
+
+boolean mqtt_reconnect() {
+  // Loop until we're reconnected
+  char mytopic[50];
+  snprintf(mytopic, 50, "/%s/%s/status", Ssite.c_str(), Smyname.c_str());
+
+
+
+  Log.verbose("Attempting MQTT connection...%d...",client.state());
+
+  // Attempt to connect
+  if (client.connect(Smyname.c_str(),Smqttuser.c_str(),Smqttpass.c_str(),mytopic,0,0,"stopped")) {
+    Log.verbose("MQTT connected");
+
+    client.publish(mytopic, "started");
+    delay(10);
+    // ... and resubscribe to my name
+    client.subscribe(Smyname.c_str());
+    delay(10);
+  } else {
+    Log.error("failed, rc=%d",client.state());
+  }
+  return client.connected();
+}
+
+
+unsigned long lastReconnectAttempt = 0;
+void mqtt_publish(char *topic, char *msg) {
+  if (!client.connected()) {
+    long now = millis();
+    if (now - lastReconnectAttempt > 5000) {
+      lastReconnectAttempt = now;
+      if (mqtt_reconnect()) {
+        lastReconnectAttempt = 0;
+      }
+    }
+  }
+  client.loop();
+
+#ifdef DEBUG
+  Serial.print("Publish message: ");
+  Serial.print(topic);
+  Serial.print(" ");
+  Serial.println(msg);
+#endif
+  client.publish(topic, msg);
 }
 
 
@@ -219,9 +279,13 @@ void setup_wifi() {
     retries++;
     Log.error("Wifi.status() = %d",WiFi.status());
   }
+  Log.verbose("Wifi connected as %s/%s",WiFi.localIP(),WiFi.subnetMask());
 }
 
 void setup_mqtt() {
+  client.setClient(espClient);
+  client.setServer(Smqttserver.c_str(), atoi(Smqttport.c_str()));
+  client.setCallback(mqtt_callback);
 
 }
 
