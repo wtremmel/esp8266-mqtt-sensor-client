@@ -176,7 +176,7 @@ void setup_led() {
 // read the config file and parse its data
 void setup_readconfig() {
   SPIFFS.begin();
-  File f = SPIFFS.open("/config.ini","r");
+  File f = SPIFFS.open("/config.json","r");
   if (!f) {
     Log.error("Cannot open config file");
     return;
