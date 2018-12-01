@@ -12,6 +12,7 @@
 
 #include <PubSubClient.h>
 #include <FS.h>
+#include <ArduinoJson.h>
 
 
 // Sensor Libraries
@@ -166,7 +167,21 @@ void setup_readconfig() {
     Log.error("Cannot open config file");
     return;
   }
+  StaticJsonBuffer<512> jsonBuffer;
 
+ // Parse the root object
+ JsonObject &root = jsonBuffer.parseObject(f);
+
+ if (!root.success())
+   Log.error("Failed to read file");
+
+ // Copy values from the JsonObject to the Config
+   config.port = root["port"] | 2731;
+   strlcpy(config.hostname,                   // <- destination
+           root["hostname"] | "example.com",  // <- source
+           sizeof(config.hostname));          // <- destination's capacity
+
+   
   f.close();
   SPIFFS.end();
 }
@@ -178,6 +193,13 @@ void setup_wifi() {
   WiFi.mode(WIFI_STA);
   WiFi.hostname(Smyname);
   WiFi.begin(Sssid.c_str(), Spass.c_str());
+
+  int retries = 0;
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    retries++;
+    Log.error("Wifi.status() = %d",WiFi.status());
+  }
 }
 
 void setup_mqtt() {
