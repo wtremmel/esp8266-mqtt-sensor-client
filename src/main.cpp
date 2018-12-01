@@ -34,7 +34,8 @@ Adafruit_TSL2561_Unified tsl2561 = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT);
 Adafruit_NeoPixel led = Adafruit_NeoPixel(NROFLEDS, NEOPIXEL, NEO_GRB + NEO_KHZ800);
 
 // Strings for dynamic config
-String Smyname, Spass, Sssid, Smqttserver, Ssite, Slocation, Smqttuser, Smqttpass, Smqttport;
+String Smyname, Spass, Sssid, Smqttserver, Ssite, Slocation, Smqttuser, Smqttpass;
+unsigned int Imqttport;
 
 
 // Flags for sensors found
@@ -74,6 +75,19 @@ void setled(byte show) {
   led.show();
 }
 
+// Debug functions
+void log_config () {
+
+  Log.verbose("Smyname = %s",Smyname.c_str());
+  Log.verbose("Ssite = %s",Ssite.c_str());
+  Log.verbose("Slocation = %s",Slocation.c_str());
+  Log.verbose("Sssid = %s",Sssid.c_str());
+  Log.verbose("Spass = %s",Spass.c_str());
+  Log.verbose("Smqttuser = %s",Smqttuser.c_str());
+  Log.verbose("Smqttpass = %s",Smqttpass.c_str());
+  Log.verbose("Imqttport = %d",Imqttport);
+
+}
 
 // Logging helper routines
 void printTimestamp(Print* _logOutput) {
@@ -176,12 +190,17 @@ void setup_readconfig() {
    Log.error("Failed to read file");
 
  // Copy values from the JsonObject to the Config
-   config.port = root["port"] | 2731;
-   strlcpy(config.hostname,                   // <- destination
-           root["hostname"] | "example.com",  // <- source
-           sizeof(config.hostname));          // <- destination's capacity
+   Smyname = root["myname"].as<String>();
+   Spass = root["network"]["pass"].as<String>();
+   Sssid = root["network"]["ssid"].as<String>();
+   Smqttserver = root["mqtt"]["server"].as<String>();
+   Ssite = root["location"]["site"].as<String>();
+   Slocation = root["location"]["room"].as<String>();
+   Smqttuser = root["mqtt"]["user"].as<String>();
+   Smqttpass = root["mqtt"]["pass"].as<String>();
+   Imqttport = root["mqtt"]["port"];
 
-   
+
   f.close();
   SPIFFS.end();
 }
@@ -212,6 +231,7 @@ void setup() {
   setled(255,0,0);
   setup_logging();
   setup_readconfig();
+  log_config();
   setup_i2c();
   setup_wifi();
   setled(255, 128, 0);
