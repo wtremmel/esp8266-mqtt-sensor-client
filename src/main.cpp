@@ -170,7 +170,7 @@ void mqtt_publish(char *topic, int i) {
 
 void mqtt_publish(char *topic, uint32_t i) {
   char buf[32];
-  snprintf(buf,31,"%u",i);
+  snprintf(buf,31,"%lu",i);
   mqtt_publish(topic,buf);
 }
 
@@ -216,8 +216,8 @@ void setup_i2c() {
         Log.notice("TSL2561 found? %T",tsl2561_found);
         if (tsl2561_found) {
           // init the sensor
-          // tsl2561.enableAutoRange(true);
-          tsl2561.setGain(TSL2561_GAIN_1X);
+          tsl2561.enableAutoRange(true);
+          // tsl2561.setGain(TSL2561_GAIN_1X);
           tsl2561.setIntegrationTime(TSL2561_INTEGRATIONTIME_101MS);
         }
       }
@@ -334,9 +334,9 @@ void loop_publish_voltage(){
 
 void loop_publish_tsl2561() {
   if (tsl2561_found) {
-    uint16_t a,b;
-    tsl2561.getLuminosity(&a,&b);
-    mqtt_publish("light",tsl2561.calculateLux(a,b));
+    sensors_event_t event;
+    tsl2561.getEvent(&event);
+    mqtt_publish("light",event.light);
   }
 }
 
