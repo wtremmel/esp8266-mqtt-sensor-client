@@ -106,7 +106,7 @@ void printNewline(Print* _logOutput) {
 void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
 
   String in;
-  for (int i = 0; i < length; i++) {
+  for (unsigned int i = 0; i < length; i++) {
     in += String((char)payload[i]);
   }
   Log.verbose("Message arrived[%s]: %s ",topic,in.c_str());
@@ -188,7 +188,7 @@ void setup_i2c() {
     error = Wire.endTransmission();
 
     if (error == 0) {
-      Log.trace("I2C device found at address 0x%2x",address);
+      Log.trace("I2C device found at address 0x%x",address);
 
       if (address == 0x39) {
         tsl2561 = Adafruit_TSL2561_Unified(address);
@@ -279,12 +279,14 @@ void setup_wifi() {
     retries++;
     Log.error("Wifi.status() = %d",WiFi.status());
   }
-  Log.verbose("Wifi connected as %s/%s",WiFi.localIP(),WiFi.subnetMask());
+  String myIP = String(WiFi.localIP().toString());
+  String myMask = String(WiFi.subnetMask().toString());
+  Log.verbose("Wifi connected as %s/%s",myIP.c_str(),myMask.c_str());
 }
 
 void setup_mqtt() {
   client.setClient(espClient);
-  client.setServer(Smqttserver.c_str(), atoi(Smqttport.c_str()));
+  client.setServer(Smqttserver.c_str(), Imqttport);
   client.setCallback(mqtt_callback);
 
 }
