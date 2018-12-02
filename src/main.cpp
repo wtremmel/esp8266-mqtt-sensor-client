@@ -6,6 +6,7 @@
 
 #if defined(ARDUINO_ARCH_ESP8266)
 #include <ESP8266WiFi.h>
+ADC_MODE(ADC_VCC);
 #else
 #include <WiFi.h>
 #endif
@@ -34,6 +35,8 @@ Adafruit_TSL2561_Unified tsl2561 = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT);
 Adafruit_NeoPixel led = Adafruit_NeoPixel(NROFLEDS, NEOPIXEL, NEO_GRB + NEO_KHZ800);
 WiFiClient espClient;
 PubSubClient client;
+
+unsigned transmission_delay = 60; // seconds
 
 // Strings for dynamic config
 String Smyname, Spass, Sssid, Smqttserver, Ssite, Slocation, Smqttuser, Smqttpass;
@@ -111,6 +114,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
   }
   Log.verbose("Message arrived[%s]: %s ",topic,in.c_str());
 
+
 }
 
 boolean mqtt_reconnect() {
@@ -132,7 +136,7 @@ boolean mqtt_reconnect() {
     client.subscribe(Smyname.c_str());
     delay(10);
   } else {
-    Log.error("failed, rc=%d",client.state());
+    Log.error("MQTT connect failed, rc=%d",client.state());
   }
   return client.connected();
 }
@@ -151,13 +155,29 @@ void mqtt_publish(char *topic, char *msg) {
   }
   client.loop();
 
-#ifdef DEBUG
-  Serial.print("Publish message: ");
-  Serial.print(topic);
-  Serial.print(" ");
-  Serial.println(msg);
-#endif
-  client.publish(topic, msg);
+  Log.verbose("MQTT Publish message [%s]:%s",topic,msg);
+
+  char mytopic[50];
+  snprintf(mytopic, 50, "/%s/%s/%s", Ssite.c_str(), Smyname.c_str(),topic);
+  client.publish(mytopic, msg);
+}
+
+void mqtt_publish(char *topic, int i) {
+  char buf[15];
+  snprintf(buf,14,"%d",i);
+  mqtt_publish(topic, buf);
+}
+
+void mqtt_publish(char *topic, uint32_t i) {
+  char buf[32];
+  snprintf(buf,31,"%u",i);
+  mqtt_publish(topic,buf);
+}
+
+void mqtt_publish(char *topic, float value) {
+  char buf[15];
+  snprintf(buf,14,"%.3f",value);
+  mqtt_publish(topic, buf);
 }
 
 
@@ -196,7 +216,8 @@ void setup_i2c() {
         Log.notice("TSL2561 found? %T",tsl2561_found);
         if (tsl2561_found) {
           // init the sensor
-          tsl2561.enableAutoRange(true);
+          // tsl2561.enableAutoRange(true);
+          tsl2561.setGain(TSL2561_GAIN_1X);
           tsl2561.setIntegrationTime(TSL2561_INTEGRATIONTIME_101MS);
         }
       }
@@ -291,7 +312,9 @@ void setup_mqtt() {
 
 }
 
+
 void setup() {
+  delay(5000);
   setup_serial();
   setup_led();
   setled(255,0,0);
@@ -305,6 +328,42 @@ void setup() {
   setled(0, 255, 0);
 }
 
+void loop_publish_voltage(){
+  mqtt_publish("voltage", (float)(ESP.getVcc() / 1000.0));
+}
+
+void loop_publish_tsl2561() {
+  if (tsl2561_found) {
+    uint16_t a,b;
+    tsl2561.getLuminosity(&a,&b);
+    mqtt_publish("light",tsl2561.calculateLux(a,b));
+  }
+}
+
+unsigned long now;
+unsigned long last_transmission = 0;
+
 void loop() {
   // put your main code here, to run repeatedly:
+  if (!client.connected()) {
+    now = millis();
+    if (now - lastReconnectAttempt > 5000) {
+      lastReconnectAttempt = now;
+      if (mqtt_reconnect()) {
+        lastReconnectAttempt = 0;
+      }
+    }
+  }
+  client.loop();
+
+  // read sensors and publish values
+
+  if ((millis() - last_transmission) > (transmission_delay * 1000)) {
+  // Voltage
+    loop_publish_voltage();
+    loop_publish_tsl2561();
+
+    last_transmission = millis();
+  }
+
 }
