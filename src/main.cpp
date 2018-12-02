@@ -120,7 +120,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
 boolean mqtt_reconnect() {
   // Loop until we're reconnected
   char mytopic[50];
-  snprintf(mytopic, 50, "/%s/%s/status", Ssite.c_str(), Smyname.c_str());
+  snprintf(mytopic, 50, "/%s/%s/status", Ssite.c_str(), Slocation.c_str());
 
 
 
@@ -158,7 +158,7 @@ void mqtt_publish(char *topic, char *msg) {
   Log.verbose("MQTT Publish message [%s]:%s",topic,msg);
 
   char mytopic[50];
-  snprintf(mytopic, 50, "/%s/%s/%s", Ssite.c_str(), Smyname.c_str(),topic);
+  snprintf(mytopic, 50, "/%s/%s/%s", Ssite.c_str(), Slocation.c_str(),topic);
   client.publish(mytopic, msg);
 }
 
