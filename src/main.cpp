@@ -26,6 +26,8 @@ ADC_MODE(ADC_VCC);
 // Global defines
 #define NEOPIXEL 14 //D5
 #define NROFLEDS 10
+#define I2CSDA 4  //D2 gruen
+#define I2CSCL 5  //D1 gelb
 
 
 // Global Objects
@@ -202,7 +204,9 @@ void setup_i2c() {
 
 
   Log.notice("Scanning i2c bus");
-  Wire.begin();
+  Wire.begin(I2CSDA, I2CSCL);
+
+
   for(address = 1; address < 127; address++ ) {
     Wire.beginTransmission(address);
     error = Wire.endTransmission();
@@ -335,10 +339,15 @@ void loop_publish_voltage(){
 void loop_publish_tsl2561() {
   if (tsl2561_found) {
     sensors_event_t event;
-    tsl2561.getEvent(&event);
-    mqtt_publish("light",event.light);
+
+    if (tsl2561.begin() && tsl2561.getEvent(&event)) {
+      mqtt_publish("light",event.light);
+    } else {
+      Log.verbose("loop_publish_tsl2561: Sensor overloaded");
+    }
   }
 }
+
 
 unsigned long now;
 unsigned long last_transmission = 0;
