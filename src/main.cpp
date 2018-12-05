@@ -318,18 +318,20 @@ void setup_mqtt() {
 
 
 void setup() {
+  setled(255,0,0);
   delay(5000);
   setup_serial();
   setup_led();
-  setled(255,0,0);
   setup_logging();
   setup_readconfig();
   log_config();
   setup_i2c();
-  setup_wifi();
   setled(255, 128, 0);
+  setup_wifi();
   setup_mqtt();
   setled(0, 255, 0);
+  delay(1000);
+  setled(0,0,0);
 }
 
 void loop_publish_voltage(){
@@ -348,6 +350,14 @@ void loop_publish_tsl2561() {
   }
 }
 
+void loop_publish_bme280() {
+  if (bme280_found) {
+    mqtt_publish("temperature", bme280.readTemperature());
+    mqtt_publish("airpressure", bme280.readPressure() / 100.0F);
+    mqtt_publish("humidity", bme280.readHumidity());
+
+  }
+}
 
 unsigned long now;
 unsigned long last_transmission = 0;
