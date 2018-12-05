@@ -235,7 +235,7 @@ void setup_i2c() {
       if (address == 0x76 || address == 0x77) {
         // BME280
         bme280_found = bme280.begin(address);
-        Log.notice("BME280 found? %T at %x",bme280_found,address);
+        Log.notice("BME280 found? %T at 0x%x",bme280_found,address);
       }
     }
   }
@@ -371,6 +371,7 @@ void loop() {
   // Voltage
     loop_publish_voltage();
     loop_publish_tsl2561();
+    loop_publish_bme280();
 
     last_transmission = millis();
   }
