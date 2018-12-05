@@ -22,6 +22,7 @@ ADC_MODE(ADC_VCC);
 #include "Adafruit_BME280.h"
 #include "Adafruit_TSL2561_U.h"
 #include <Adafruit_NeoPixel.h>
+#include <U8x8lib.h>
 
 // Global defines
 #define NEOPIXEL 14 //D5
@@ -37,6 +38,7 @@ Adafruit_TSL2561_Unified tsl2561 = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT);
 Adafruit_NeoPixel led = Adafruit_NeoPixel(NROFLEDS, NEOPIXEL, NEO_GRB + NEO_KHZ800);
 WiFiClient espClient;
 PubSubClient client;
+U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
 
 unsigned transmission_delay = 60; // seconds
 
@@ -50,6 +52,7 @@ bool si7021_found = false;
 bool bme280_found = false;
 bool tsl2561_found= false;
 bool voltage_found= true;
+bool u8x8_found = false;
 bool rtc_init_done = false;
 bool rtc_alarm_raised = false;
 
@@ -193,6 +196,7 @@ void setup_i2c() {
 // 0x29 TSL45315 (Light)
 // 0x38 VEML6070 (Light)
 // 0x39 TSL2561
+// 0x3c Display
 // 0x40 SI7021
 // 0x48 4*AD converter
 // 0x4a GY49 or MAX44009 Light Sensor
@@ -223,6 +227,14 @@ void setup_i2c() {
           tsl2561.enableAutoRange(true);
           // tsl2561.setGain(TSL2561_GAIN_1X);
           tsl2561.setIntegrationTime(TSL2561_INTEGRATIONTIME_101MS);
+        }
+      }
+      if (address == 0x3c) {
+        u8x8_found = u8x8.begin();
+        if (u8x8_found) {
+          Log.notice("U8xu found? %T",u8x8_found);
+          u8x8.clear();
+          u8x8.setFont(u8x8_font_chroma48medium8_r);
         }
       }
       if (address == 0x40) {
@@ -318,10 +330,10 @@ void setup_mqtt() {
 
 
 void setup() {
+  setup_led();
   setled(255,0,0);
   delay(5000);
   setup_serial();
-  setup_led();
   setup_logging();
   setup_readconfig();
   log_config();
@@ -361,6 +373,7 @@ void loop_publish_bme280() {
 
 unsigned long now;
 unsigned long last_transmission = 0;
+unsigned long last_display = 0;
 
 void loop() {
   // put your main code here, to run repeatedly:
@@ -384,6 +397,18 @@ void loop() {
     loop_publish_bme280();
 
     last_transmission = millis();
+  }
+
+  if (u8x8_found && ((millis() - last_display) > 1000)) {
+    if (bme280_found) {
+      char s[10];
+      // u8x8.clearLine(0);
+      snprintf(s, 9, "%.1f C", bme280.readTemperature());
+
+      u8x8.setFont(u8x8_font_amstrad_cpc_extended_r);
+      u8x8.draw2x2String(1, 3, s);
+      }
+    last_display = millis();
   }
 
 }
