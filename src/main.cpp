@@ -56,6 +56,12 @@ bool u8x8_found = false;
 bool rtc_init_done = false;
 bool rtc_alarm_raised = false;
 
+// Flags for display
+#define DISPLAY_OFF 0
+#define DISPLAY_TEMPERATURE 1
+
+unsigned int display_what = DISPLAY_TEMPERATURE;
+
 
 // LED routines
 void setled(byte r, byte g, byte b) {
@@ -113,13 +119,43 @@ void printNewline(Print* _logOutput) {
 // MQTT main callback routines
 void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
 
-  String in;
+  String in[10];
+  unsigned int wordcounter = 0;
+
   for (unsigned int i = 0; i < length; i++) {
-    in += String((char)payload[i]);
+    if ((char)payload[i] == ' ' && wordcounter < 9) {
+      wordcounter++;
+    } else {
+      in[wordcounter] += String((char)payload[i]);
+    }
   }
-  Log.verbose("Message arrived[%s]: %s ",topic,in.c_str());
+  Log.verbose("Message arrived[%s]: %d Words",topic,wordcounter);
+  for (unsigned int i=0; i <= wordcounter; i++)
+    Log.verbose("Word[%d] = %s",i,in[i].c_str());
 
+  if (in[0] == "reboot") {
+    ESP.restart();
+  }
 
+  if (in[0] == "led") {
+    if (wordcounter == 3) {
+      // led r g b
+      setled(in[1].toInt(),in[2].toInt(),in[3].toInt());
+    } else if (wordcounter == 4) {
+      setled(in[1].toInt(),in[2].toInt(),in[3].toInt(),in[4].toInt());
+    }
+  }
+
+  if (in[0] == "display") {
+    if (wordcounter == 1) {
+      if (in[1] == "temperature") {
+        display_what = DISPLAY_TEMPERATURE;
+      } else if (in[1] == off) {
+        u8x8.clearDisplay();
+        display_what = DISPLAY_OFF;
+      }
+    }
+  }
 }
 
 boolean mqtt_reconnect() {
@@ -400,15 +436,16 @@ void loop() {
   }
 
   if (u8x8_found && ((millis() - last_display) > 1000)) {
-    if (bme280_found) {
-      char s[10];
-      // u8x8.clearLine(0);
-      snprintf(s, 9, "%.1f C", bme280.readTemperature());
+    if (display_what == DISPLAY_TEMPERATURE) {
+      if (bme280_found) {
+        char s[10];
+        // u8x8.clearLine(0);
+        snprintf(s, 9, "%.1f C", bme280.readTemperature());
 
-      u8x8.setFont(u8x8_font_amstrad_cpc_extended_r);
-      u8x8.draw2x2String(1, 3, s);
+        u8x8.setFont(u8x8_font_amstrad_cpc_extended_r);
+        u8x8.draw2x2String(1, 3, s);
       }
-    last_display = millis();
+      last_display = millis();
+    }
   }
-
 }
