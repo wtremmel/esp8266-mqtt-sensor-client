@@ -59,8 +59,17 @@ bool rtc_alarm_raised = false;
 // Flags for display
 #define DISPLAY_OFF 0
 #define DISPLAY_TEMPERATURE 1
+#define DISPLAY_HUMIDITY 2
+#define DISPLAY_AIRPRESSURE 3
+#define DISPLAY_LUX 4
+#define DISPLAY_STRING 5
 
 unsigned int display_what = DISPLAY_TEMPERATURE;
+
+// Timer variables
+unsigned long now;
+unsigned long last_transmission = 0;
+unsigned long last_display = 0;
 
 
 // LED routines
@@ -147,12 +156,25 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
   }
 
   if (in[0] == "display") {
+    last_display = 0;
     if (wordcounter == 1) {
-      if (in[1] == "temperature") {
+      if (in[1] == "humidity") {
+        display_what = DISPLAY_HUMIDITY;
+      } else if (in[1] == "airpressure") {
+        display_what = DISPLAY_AIRPRESSURE;
+      } else if (in[1] == "temperature") {
         display_what = DISPLAY_TEMPERATURE;
-      } else if (in[1] == off) {
+      } else if (in[1] == "off") {
         u8x8.clearDisplay();
         display_what = DISPLAY_OFF;
+      } else { // String
+        display_what = DISPLAY_STRING;
+        u8x8.setFont(u8x8_font_amstrad_cpc_extended_r);
+        u8x8.clearDisplay();
+        if (in[1].length() <= 8)
+          u8x8.draw2x2String(0, 3, in[1].c_str());
+        else
+          u8x8.draw1x2String(0, 3, in[1].c_str());
       }
     }
   }
@@ -407,9 +429,7 @@ void loop_publish_bme280() {
   }
 }
 
-unsigned long now;
-unsigned long last_transmission = 0;
-unsigned long last_display = 0;
+
 
 void loop() {
   // put your main code here, to run repeatedly:
@@ -436,16 +456,33 @@ void loop() {
   }
 
   if (u8x8_found && ((millis() - last_display) > 1000)) {
-    if (display_what == DISPLAY_TEMPERATURE) {
-      if (bme280_found) {
-        char s[10];
-        // u8x8.clearLine(0);
-        snprintf(s, 9, "%.1f C", bme280.readTemperature());
-
-        u8x8.setFont(u8x8_font_amstrad_cpc_extended_r);
+    char s[10];
+    u8x8.setFont(u8x8_font_amstrad_cpc_extended_r);
+    switch(display_what) {
+      case DISPLAY_TEMPERATURE:
+        if (bme280_found) {
+          snprintf(s, 9, "%.1f C", bme280.readTemperature());
+        }
+        u8x8.clearDisplay();
         u8x8.draw2x2String(1, 3, s);
-      }
-      last_display = millis();
+        break;
+      case DISPLAY_HUMIDITY:
+        if (bme280_found) {
+          snprintf(s, 9, "%.1f %%", bme280.readHumidity());
+        }
+        u8x8.clearDisplay();
+        u8x8.draw2x2String(1, 3, s);
+        break;
+      case DISPLAY_AIRPRESSURE:
+        if (bme280_found) {
+          snprintf(s, 9, "%d hPa", (int)(bme280.readPressure() / 100));
+        }
+        u8x8.clearDisplay();
+        u8x8.draw2x2String(1, 3, s);
+        break;
+
     }
+
+    last_display = millis();
   }
 }
