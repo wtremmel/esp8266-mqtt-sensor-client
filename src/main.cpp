@@ -155,26 +155,49 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
     }
   }
 
-  if (in[0] == "display") {
+  if (in[0] == "display" && wordcounter >= 1) {
     last_display = 0;
-    if (wordcounter == 1) {
-      if (in[1] == "humidity") {
-        display_what = DISPLAY_HUMIDITY;
-      } else if (in[1] == "airpressure") {
-        display_what = DISPLAY_AIRPRESSURE;
-      } else if (in[1] == "temperature") {
-        display_what = DISPLAY_TEMPERATURE;
-      } else if (in[1] == "off") {
-        u8x8.clearDisplay();
-        display_what = DISPLAY_OFF;
-      } else { // String
-        display_what = DISPLAY_STRING;
-        u8x8.setFont(u8x8_font_amstrad_cpc_extended_r);
-        u8x8.clearDisplay();
-        if (in[1].length() <= 8)
-          u8x8.draw2x2String(0, 3, in[1].c_str());
-        else
-          u8x8.draw1x2String(0, 3, in[1].c_str());
+    if (in[1] == "humidity") {
+      display_what = DISPLAY_HUMIDITY;
+    } else if (in[1] == "airpressure") {
+      display_what = DISPLAY_AIRPRESSURE;
+    } else if (in[1] == F("temperature")) {
+      display_what = DISPLAY_TEMPERATURE;
+    } else if (in[1] == "off") {
+      u8x8.clearDisplay();
+      display_what = DISPLAY_OFF;
+    } else if (in[1] == F("flip")) {
+      u8x8.clearDisplay();
+      u8x8.setFlipMode(wordcounter > 1);
+    } else { // String
+      // large or small?
+      // small, if a line is longer than 8 chars or if there are more than 3 lines
+      boolean large = true;
+      int start;
+      for (unsigned int i=1; i<=wordcounter;i++) {
+        if (in[i].length() > 8)
+          large = false;
+      }
+      if (wordcounter > 3)
+        large = false;
+
+      if (wordcounter == 1)
+        start = 3;
+      else
+        start = 0;
+
+      display_what = DISPLAY_STRING;
+      u8x8.setFont(u8x8_font_amstrad_cpc_extended_r);
+      u8x8.clearDisplay();
+
+      for (unsigned int i=1; i <= wordcounter; i++) {
+        if (large) {
+          u8x8.draw2x2UTF8(0, start, in[i].c_str());
+          start += 3;
+        } else {
+          u8x8.draw1x2UTF8(0, start, in[i].c_str());
+          start += 2;
+        }
       }
     }
   }
