@@ -1,5 +1,21 @@
 // No more ifdefs
 
+// List of devices:
+// #define ESP1 // Test Arbeitszimmer
+// #define ESP2 // Kueche
+// #define ESP3 // Wohnzimmer
+// #define ESP4 // Garten
+// #define ESP6 // Test mit Lithium-Akku
+// #define ESP7  // Hausanschlussraum
+// #define ESP8 // Fernsehzimmer
+// #define ESP9 // Heizraum
+// #define ESP10 // Büro Wolfgang / Schifferstadt / Flur 1.OG
+// #define ESP11 // Lolin32 Lite
+// #define ESP12 // Schlafzimmer
+// #define ESP13 // Lichterkette / Uhr
+// #define ESP14 // Display
+// #define ESP15 // Keller
+// ESP16 Erdgeschoss Flur
 
 #include <Arduino.h>
 #include <ArduinoLog.h>
@@ -193,6 +209,9 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
   }
 
   if (in[0] == F("config")) {
+    if (wordcounter == 0) {
+      log_config();
+    }
     if (wordcounter == 1) {
       if (in[1] == F("write")) {
         log_config();
@@ -208,6 +227,12 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
       }
       if (in[1] == F("myname")) {
         Smyname = in[2];
+      }
+      if (in[1] == F("mqttuser")) {
+        Smqttuser = in[2];
+      }
+      if (in[1] == F("mqttpass")) {
+        Smqttpass = in[2];
       }
     }
   }
@@ -538,7 +563,7 @@ void loop() {
     last_transmission = millis();
   }
 
-  if (u8x8_found && ((millis() - last_display) > 1000)) {
+  if (u8x8_found && ((millis() - last_display) > (1000*30))) {
     char s[10];
     u8x8.setFont(u8x8_font_amstrad_cpc_extended_r);
     switch(display_what) {
