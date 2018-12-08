@@ -45,6 +45,7 @@ unsigned transmission_delay = 60; // seconds
 // Strings for dynamic config
 String Smyname, Spass, Sssid, Smqttserver, Ssite, Sroom, Smqttuser, Smqttpass;
 unsigned int Imqttport;
+bool Bflipped;
 
 
 // Flags for sensors found
@@ -111,6 +112,7 @@ void log_config () {
   Log.verbose("Smqttuser = %s",Smqttuser.c_str());
   Log.verbose("Smqttpass = %s",Smqttpass.c_str());
   Log.verbose("Imqttport = %d",Imqttport);
+  Log.verbose(F("Bflipped = %t"),Bflipped);
 
 }
 
@@ -118,6 +120,7 @@ void write_config () {
   StaticJsonBuffer<512> jsonBuffer;
   JsonObject& root = jsonBuffer.createObject();
   root["myname"] = Smyname;
+  root["flipped"] = Bflipped;
   JsonObject& network = root.createNestedObject("network");
   network["pass"] = Spass;
   network["ssid"] = Sssid;
@@ -223,6 +226,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
     } else if (in[1] == F("flip")) {
       u8x8.clearDisplay();
       u8x8.setFlipMode(wordcounter > 1);
+      Bflipped = (wordcounter > 1);
     } else { // String
       // large or small?
       // small, if a line is longer than 8 chars or if there are more than 3 lines
@@ -370,6 +374,7 @@ void setup_i2c() {
           Log.notice("U8xu found? %T",u8x8_found);
           u8x8.clear();
           u8x8.setFont(u8x8_font_chroma48medium8_r);
+          u8x8.setFlipMode(Bflipped);
         }
       }
       if (address == 0x40) {
@@ -423,6 +428,7 @@ void setup_readconfig() {
 
  // Copy values from the JsonObject to the Config
    Smyname = root["myname"].as<String>();
+   Bflipped = root["flipped"];
    Spass = root["network"]["pass"].as<String>();
    Sssid = root["network"]["ssid"].as<String>();
    Smqttserver = root["mqtt"]["server"].as<String>();
