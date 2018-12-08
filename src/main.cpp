@@ -43,7 +43,7 @@ U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
 unsigned transmission_delay = 60; // seconds
 
 // Strings for dynamic config
-String Smyname, Spass, Sssid, Smqttserver, Ssite, Slocation, Smqttuser, Smqttpass;
+String Smyname, Spass, Sssid, Smqttserver, Ssite, Sroom, Smqttuser, Smqttpass;
 unsigned int Imqttport;
 
 
@@ -105,13 +105,47 @@ void log_config () {
 
   Log.verbose("Smyname = %s",Smyname.c_str());
   Log.verbose("Ssite = %s",Ssite.c_str());
-  Log.verbose("Slocation = %s",Slocation.c_str());
+  Log.verbose("Sroom = %s",Sroom.c_str());
   Log.verbose("Sssid = %s",Sssid.c_str());
   Log.verbose("Spass = %s",Spass.c_str());
   Log.verbose("Smqttuser = %s",Smqttuser.c_str());
   Log.verbose("Smqttpass = %s",Smqttpass.c_str());
   Log.verbose("Imqttport = %d",Imqttport);
 
+}
+
+void write_config () {
+  StaticJsonBuffer<512> jsonBuffer;
+  JsonObject& root = jsonBuffer.createObject();
+  root["myname"] = Smyname;
+  JsonObject& network = root.createNestedObject("network");
+  network["pass"] = Spass;
+  network["ssid"] = Sssid;
+  JsonObject& mqtt = root.createNestedObject("mqtt");
+  mqtt["server"] = Smqttserver;
+  mqtt["user"] = Smqttuser;
+  mqtt["pass"] = Smqttpass;
+  mqtt["port"] = Imqttport;
+  JsonObject& location = root.createNestedObject("location");
+  location["site"] = Ssite;
+  location["room"] = Sroom;
+
+  Log.notice(F("Writing new config file"));
+  root.prettyPrintTo(Serial);
+
+  SPIFFS.begin();
+  File f = SPIFFS.open("/config.json","w");
+  if (!f) {
+    Log.error(F("Open of config file for writing failed"));
+  } else {
+    if (root.printTo(f) == 0) {
+      Log.error(F("Writing object into file failed"));
+    } else {
+      Log.notice(F("Written new config. Now reboot"));
+    }
+    f.close();
+  }
+SPIFFS.end();
 }
 
 // Logging helper routines
@@ -152,6 +186,26 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
       setled(in[1].toInt(),in[2].toInt(),in[3].toInt());
     } else if (wordcounter == 4) {
       setled(in[1].toInt(),in[2].toInt(),in[3].toInt(),in[4].toInt());
+    }
+  }
+
+  if (in[0] == F("config")) {
+    if (wordcounter == 1) {
+      if (in[1] == F("write")) {
+        log_config();
+        write_config();
+      }
+    }
+    if (wordcounter == 2) {
+      if (in[1] == F("room")) {
+        Sroom = in[2];
+      }
+      if (in[1] == F("site")) {
+        Ssite = in[2];
+      }
+      if (in[1] == F("myname")) {
+        Smyname = in[2];
+      }
     }
   }
 
@@ -206,7 +260,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
 boolean mqtt_reconnect() {
   // Loop until we're reconnected
   char mytopic[50];
-  snprintf(mytopic, 50, "/%s/%s/status", Ssite.c_str(), Slocation.c_str());
+  snprintf(mytopic, 50, "/%s/%s/status", Ssite.c_str(), Sroom.c_str());
 
 
 
@@ -244,7 +298,7 @@ void mqtt_publish(char *topic, char *msg) {
   Log.verbose("MQTT Publish message [%s]:%s",topic,msg);
 
   char mytopic[50];
-  snprintf(mytopic, 50, "/%s/%s/%s", Ssite.c_str(), Slocation.c_str(),topic);
+  snprintf(mytopic, 50, "/%s/%s/%s", Ssite.c_str(), Sroom.c_str(),topic);
   client.publish(mytopic, msg);
 }
 
@@ -373,7 +427,7 @@ void setup_readconfig() {
    Sssid = root["network"]["ssid"].as<String>();
    Smqttserver = root["mqtt"]["server"].as<String>();
    Ssite = root["location"]["site"].as<String>();
-   Slocation = root["location"]["room"].as<String>();
+   Sroom = root["location"]["room"].as<String>();
    Smqttuser = root["mqtt"]["user"].as<String>();
    Smqttpass = root["mqtt"]["pass"].as<String>();
    Imqttport = root["mqtt"]["port"];
