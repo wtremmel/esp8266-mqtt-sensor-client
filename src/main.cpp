@@ -23,10 +23,14 @@
 #if defined(ARDUINO_ARCH_ESP8266)
 #include <ESP8266WiFi.h>
 #include <FS.h>
+#define I2CSDA 4  //D2 gruen
+#define I2CSCL 5  //D1 gelb
 ADC_MODE(ADC_VCC);
 #elif defined (ARDUINO_ARCH_ESP32)
 #include <WiFi.h>
 #include <SPIFFS.h>
+#define I2CSDA 4  //D2 gruen
+#define I2CSCL 15  //D1 gelb
 #else
 #pragma message ("unknow build enviroment")
 #endif
@@ -46,8 +50,6 @@ ADC_MODE(ADC_VCC);
 // Global defines
 #define NEOPIXEL 14 //D5
 #define NROFLEDS 10
-#define I2CSDA 4  //D2 gruen
-#define I2CSCL 5  //D1 gelb
 
 
 // Global Objects
@@ -419,6 +421,7 @@ void setup_i2c() {
       }
     }
   }
+  Log.notice("End scanning i2c bus");
 }
 
 void setup_serial() {
