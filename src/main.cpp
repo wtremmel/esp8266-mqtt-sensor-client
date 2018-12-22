@@ -22,13 +22,16 @@
 
 #if defined(ARDUINO_ARCH_ESP8266)
 #include <ESP8266WiFi.h>
+#include <FS.h>
 ADC_MODE(ADC_VCC);
-#else
+#elif defined (ARDUINO_ARCH_ESP32)
 #include <WiFi.h>
+#include <SPIFFS.h>
+#else
+#pragma message ("unknow build enviroment")
 #endif
 
 #include <PubSubClient.h>
-#include <FS.h>
 #include <ArduinoJson.h>
 
 
@@ -473,7 +476,9 @@ void setup_wifi() {
   WiFi.disconnect();
   delay(100);
   WiFi.mode(WIFI_STA);
+#if defined(ARDUINO_ARCH_ESP8266)
   WiFi.hostname(Smyname);
+#endif
   WiFi.begin(Sssid.c_str(), Spass.c_str());
 
   int retries = 0;
@@ -513,7 +518,9 @@ void setup() {
 }
 
 void loop_publish_voltage(){
+#if defined(ARDUINO_ARCH_ESP8266)
   mqtt_publish("voltage", (float)(ESP.getVcc() / 1000.0));
+#endif
 }
 
 void loop_publish_tsl2561() {

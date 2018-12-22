@@ -1,5 +1,5 @@
 {
-  "myname":"esp99",
+  "myname":"esp32",
   "network": {
     "ssid":"AnkhMorpork",
     "pass":"TheC0l0r0fMag1c"
@@ -12,6 +12,6 @@
   },
   "location":{
     "site":"Chattenweg5",
-    "room":"Test99"
+    "room":"Test32"
   }
 }
