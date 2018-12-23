@@ -532,8 +532,26 @@ void setup_mqtt() {
 
 // ESP32 Specific Setup routines
 #if defined(ARDUINO_ARCH_ESP32)
-void callback_esp32_gap (esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
+void callback_esp32_gap(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
+  char bda_str[18];
+  char uuid_str[37];
 
+  switch (event) {
+    case ESP_BT_GAP_DISC_RES_EVT:
+      sprintf(bda_str,"%02x:%02x:%02x:%02x:%02x:%02x",
+        param->disc_res.bda[0],
+        param->disc_res.bda[1],
+        param->disc_res.bda[2],
+        param->disc_res.bda[3],
+        param->disc_res.bda[4],
+        param->disc_res.bda[5]);
+      Log.notice(F("BT Device found %s"),bda_str);
+      
+      break;
+    default:
+      Log.verbose(F("BT event %d"),event);
+      break;
+  }
 }
 
 
@@ -556,8 +574,6 @@ void setup_esp32_bluetooth() {
 
   esp_bt_dev_set_device_name(Smyname.c_str());
   esp_bt_gap_register_callback(callback_esp32_gap);
-  esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, 10, 0);
-
 }
 
 void setup_esp32() {
@@ -608,7 +624,12 @@ void loop_publish_bme280() {
     mqtt_publish("temperature", bme280.readTemperature());
     mqtt_publish("airpressure", bme280.readPressure() / 100.0F);
     mqtt_publish("humidity", bme280.readHumidity());
+  }
+}
 
+void loop_publish_veml6070() {
+  if (veml_found) {
+    mqtt_publish("UV", veml.readUV());
   }
 }
 
@@ -627,6 +648,10 @@ void loop() {
   }
   client.loop();
 
+#if defined(ARDUINO_ARCH_ESP32)
+  esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, 10, 10);
+#endif
+
   // read sensors and publish values
 
   if ((millis() - last_transmission) > (transmission_delay * 1000)) {
@@ -634,6 +659,7 @@ void loop() {
     loop_publish_voltage();
     loop_publish_tsl2561();
     loop_publish_bme280();
+    loop_publish_veml6070();
 
     last_transmission = millis();
   }
