@@ -537,6 +537,8 @@ void callback_esp32_gap(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *para
   char uuid_str[37];
 
   switch (event) {
+    case 1:
+      break;
     case ESP_BT_GAP_DISC_RES_EVT:
       sprintf(bda_str,"%02x:%02x:%02x:%02x:%02x:%02x",
         param->disc_res.bda[0],
@@ -546,7 +548,7 @@ void callback_esp32_gap(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *para
         param->disc_res.bda[4],
         param->disc_res.bda[5]);
       Log.notice(F("BT Device found %s"),bda_str);
-      
+
       break;
     default:
       Log.verbose(F("BT event %d"),event);
