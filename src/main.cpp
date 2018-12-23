@@ -55,6 +55,7 @@ ADC_MODE(ADC_VCC);
 #include "Adafruit_BME280.h"
 #include "Adafruit_TSL2561_U.h"
 #include <Adafruit_NeoPixel.h>
+#include "Adafruit_VEML6070.h"
 #include <U8x8lib.h>
 
 // Global defines
@@ -66,6 +67,7 @@ ADC_MODE(ADC_VCC);
 Adafruit_Si7021 si7021;
 Adafruit_BME280 bme280;
 Adafruit_TSL2561_Unified tsl2561 = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT);
+Adafruit_VEML6070 veml = Adafruit_VEML6070();
 Adafruit_NeoPixel led = Adafruit_NeoPixel(NROFLEDS, NEOPIXEL, NEO_GRB + NEO_KHZ800);
 WiFiClient espClient;
 PubSubClient client;
@@ -85,6 +87,7 @@ bool bme280_found = false;
 bool tsl2561_found= false;
 bool voltage_found= true;
 bool u8x8_found = false;
+bool veml_found = false;
 bool rtc_init_done = false;
 bool rtc_alarm_raised = false;
 
@@ -414,6 +417,14 @@ void setup_i2c() {
           tsl2561.setIntegrationTime(TSL2561_INTEGRATIONTIME_101MS);
         }
       }
+      if (address == 0x38) {
+        // VEML6070
+        veml.begin(VEML6070_1_T);
+        if (veml.readUV() != -1) {
+          veml_found = true;
+        }
+        Log.notice(F("VEML6070 found? %T"), veml_found);
+      }
       if (address == 0x3c) {
         u8x8_found = u8x8.begin();
         if (u8x8_found) {
@@ -522,7 +533,7 @@ void setup_mqtt() {
 // ESP32 Specific Setup routines
 #if defined(ARDUINO_ARCH_ESP32)
 void callback_esp32_gap (esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
-  
+
 }
 
 
