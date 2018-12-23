@@ -29,10 +29,20 @@ ADC_MODE(ADC_VCC);
 #elif defined (ARDUINO_ARCH_ESP32)
 #include <WiFi.h>
 #include <SPIFFS.h>
-#define I2CSDA 4  //D2 gruen
-#define I2CSCL 15  //D1 gelb
+
+#include "esp_bt.h"
+#include "esp_bt_main.h"
+#include "esp_bt_device.h"
+#include "esp_gap_bt_api.h"
+
 #else
 #pragma message ("unknow build enviroment")
+#endif
+
+// Board dependencies
+#if BOARD == heltec
+#define I2CSDA 4  //D2 gruen
+#define I2CSCL 15  //D1 gelb
 #endif
 
 #include <PubSubClient.h>
@@ -509,6 +519,41 @@ void setup_mqtt() {
 }
 
 
+// ESP32 Specific Setup routines
+#if defined(ARDUINO_ARCH_ESP32)
+void callback_esp32_gap (esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
+  
+}
+
+
+
+void setup_esp32_bluetooth() {
+  if (!btStart()) {
+    Log.error(F("Failed to initialize bluetooth"));
+    return;
+  }
+
+  if (esp_bluedroid_init() != ESP_OK) {
+    Log.error(F("Failed to initialize bluedroid"));
+    return;
+  }
+
+  if (esp_bluedroid_enable() != ESP_OK) {
+    Log.error(F("Failed to enable bluedroid"));
+    return;
+  }
+
+  esp_bt_dev_set_device_name(Smyname.c_str());
+  esp_bt_gap_register_callback(callback_esp32_gap);
+  esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, 10, 0);
+
+}
+
+void setup_esp32() {
+  setup_esp32_bluetooth();
+}
+#endif
+
 void setup() {
   setup_led();
   setled(255,0,0);
@@ -518,6 +563,9 @@ void setup() {
   setup_readconfig();
   log_config();
   setup_i2c();
+#ifdef ARDUINO_ARCH_ESP32
+  setup_esp32();
+#endif
   setled(255, 128, 0);
   setup_wifi();
   setup_mqtt();
