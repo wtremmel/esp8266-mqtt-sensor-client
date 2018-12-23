@@ -379,6 +379,12 @@ void setup_i2c() {
   Log.notice("Scanning i2c bus");
   Wire.begin(I2CSDA, I2CSCL);
 
+  // Try for DISPLAY
+  pinMode(16,OUTPUT);
+  digitalWrite(16,LOW);
+  delay(100);
+  digitalWrite(16,HIGH);
+
 
   for(address = 1; address < 127; address++ ) {
     Wire.beginTransmission(address);
