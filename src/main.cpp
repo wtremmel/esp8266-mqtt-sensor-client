@@ -80,6 +80,7 @@ static app_gap_cb_t m_dev_info;
 #include "Adafruit_TSL2561_U.h"
 #include <Adafruit_NeoPixel.h>
 #include "Adafruit_VEML6070.h"
+#include "Adafruit_ADS1015.h"
 #include <U8x8lib.h>
 
 // Global defines
@@ -92,6 +93,7 @@ Adafruit_Si7021 si7021;
 Adafruit_BME280 bme280;
 Adafruit_TSL2561_Unified tsl2561 = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT);
 Adafruit_VEML6070 veml = Adafruit_VEML6070();
+Adafruit_ADS1115 ads1115;
 Adafruit_NeoPixel led = Adafruit_NeoPixel(NROFLEDS, NEOPIXEL, NEO_GRB + NEO_KHZ800);
 WiFiClient espClient;
 PubSubClient client;
@@ -112,6 +114,7 @@ bool tsl2561_found= false;
 bool voltage_found= true;
 bool u8x8_found = false;
 bool veml_found = false;
+bool ads1115_found = false;
 bool rtc_init_done = false;
 bool rtc_alarm_raised = false;
 
@@ -409,7 +412,7 @@ void setup_i2c() {
 // 0x39 TSL2561
 // 0x3c Display
 // 0x40 SI7021
-// 0x48 4*AD converter
+// 0x48 4*AD converter ADS1115
 // 0x4a GY49 or MAX44009 Light Sensor
 // 0x50 PCF8583P
 // 0x57 ATMEL732
@@ -471,7 +474,12 @@ void setup_i2c() {
         si7021_found = si7021.begin();
         Log.notice("Si7021 found? %T",si7021_found);
       }
-
+      if ((address >= 0x48) && (address <= 0x4b)) {
+        ads1115 = Adafruit_ADS1115(address);
+        ads1115.begin();
+        ads1115_found = true;
+        Log.notice(F("ADS1115 found at 0x%x"),address);
+      }
       if (address == 0x76 || address == 0x77) {
         // BME280
         bme280_found = bme280.begin(address);
