@@ -34,6 +34,27 @@ ADC_MODE(ADC_VCC);
 #include "esp_bt_main.h"
 #include "esp_bt_device.h"
 #include "esp_gap_bt_api.h"
+typedef enum {
+    APP_GAP_STATE_IDLE = 0,
+    APP_GAP_STATE_DEVICE_DISCOVERING,
+    APP_GAP_STATE_DEVICE_DISCOVER_COMPLETE,
+    APP_GAP_STATE_SERVICE_DISCOVERING,
+    APP_GAP_STATE_SERVICE_DISCOVER_COMPLETE,
+} app_gap_state_t;
+
+typedef struct {
+    bool dev_found;
+    uint8_t bdname_len;
+    uint8_t eir_len;
+    uint8_t rssi;
+    uint32_t cod;
+    uint8_t eir[ESP_BT_GAP_EIR_DATA_LEN];
+    uint8_t bdname[ESP_BT_GAP_MAX_BDNAME_LEN + 1];
+    esp_bd_addr_t bda;
+    app_gap_state_t state;
+} app_gap_cb_t;
+
+static app_gap_cb_t m_dev_info;
 
 #else
 #pragma message ("unknow build enviroment")
@@ -106,6 +127,8 @@ unsigned long now;
 unsigned long last_transmission = 0;
 unsigned long last_display = 0;
 
+// forward declarations
+boolean setup_wifi();
 
 // LED routines
 void setled(byte r, byte g, byte b) {
@@ -309,7 +332,10 @@ boolean mqtt_reconnect() {
   char mytopic[50];
   snprintf(mytopic, 50, "/%s/%s/status", Ssite.c_str(), Sroom.c_str());
 
-
+  if (WiFi.status() != WL_CONNECTED) {
+    if (!setup_wifi())
+      return false;
+  }
 
   Log.verbose("Attempting MQTT connection...%d...",client.state());
 
@@ -501,7 +527,7 @@ void setup_readconfig() {
   SPIFFS.end();
 }
 
-void setup_wifi() {
+boolean setup_wifi() {
   WiFi.persistent(false);
   WiFi.disconnect();
   delay(100);
@@ -515,11 +541,16 @@ void setup_wifi() {
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
     retries++;
-    Log.error("Wifi.status() = %d",WiFi.status());
+    Log.error(F("Wifi.status() = %d"),WiFi.status());
+    if (retries > 20) {
+      Log.error(F("Cannot connect to %s"),Sssid.c_str());;
+      return false;
+    }
   }
   String myIP = String(WiFi.localIP().toString());
   String myMask = String(WiFi.subnetMask().toString());
   Log.verbose("Wifi connected as %s/%s",myIP.c_str(),myMask.c_str());
+  return true;
 }
 
 void setup_mqtt() {
@@ -532,6 +563,126 @@ void setup_mqtt() {
 
 // ESP32 Specific Setup routines
 #if defined(ARDUINO_ARCH_ESP32)
+
+char *bda2str(esp_bd_addr_t bda, char *str, size_t size)
+{
+    if (bda == NULL || str == NULL || size < 18) {
+        return NULL;
+    }
+
+    uint8_t *p = bda;
+    sprintf(str, "%02x:%02x:%02x:%02x:%02x:%02x",
+            p[0], p[1], p[2], p[3], p[4], p[5]);
+    return str;
+}
+
+bool get_name_from_eir(uint8_t *eir, uint8_t *bdname, uint8_t *bdname_len)
+{
+    uint8_t *rmt_bdname = NULL;
+    uint8_t rmt_bdname_len = 0;
+
+    if (!eir) {
+        return false;
+    }
+
+    rmt_bdname = esp_bt_gap_resolve_eir_data(eir, ESP_BT_EIR_TYPE_CMPL_LOCAL_NAME, &rmt_bdname_len);
+    if (!rmt_bdname) {
+        rmt_bdname = esp_bt_gap_resolve_eir_data(eir, ESP_BT_EIR_TYPE_SHORT_LOCAL_NAME, &rmt_bdname_len);
+    }
+
+    if (rmt_bdname) {
+        if (rmt_bdname_len > ESP_BT_GAP_MAX_BDNAME_LEN) {
+            rmt_bdname_len = ESP_BT_GAP_MAX_BDNAME_LEN;
+        }
+
+        if (bdname) {
+            memcpy(bdname, rmt_bdname, rmt_bdname_len);
+            bdname[rmt_bdname_len] = '\0';
+        }
+        if (bdname_len) {
+            *bdname_len = rmt_bdname_len;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+void update_device_info(esp_bt_gap_cb_param_t *param)
+{
+    char bda_str[18];
+    uint32_t cod = 0;
+    int32_t rssi = -129; /* invalid value */
+    esp_bt_gap_dev_prop_t *p;
+
+    Log.verbose("Device found: %s", bda2str(param->disc_res.bda, bda_str, 18));
+    for (int i = 0; i < param->disc_res.num_prop; i++) {
+        p = param->disc_res.prop + i;
+        switch (p->type) {
+        case ESP_BT_GAP_DEV_PROP_COD:
+            cod = *(uint32_t *)(p->val);
+            Log.verbose("--Class of Device: 0x%x", cod);
+            break;
+        case ESP_BT_GAP_DEV_PROP_RSSI:
+            rssi = *(int8_t *)(p->val);
+            Log.verbose("--RSSI: %d", rssi);
+            break;
+        case ESP_BT_GAP_DEV_PROP_BDNAME:
+        default:
+            break;
+        }
+    }
+
+    /* search for device with MAJOR service class as "rendering" in COD */
+    app_gap_cb_t *p_dev = &m_dev_info;
+    if (p_dev->dev_found && 0 != memcmp(param->disc_res.bda, p_dev->bda, ESP_BD_ADDR_LEN)) {
+        return;
+    }
+
+    if (!esp_bt_gap_is_valid_cod(cod) ||
+            !(esp_bt_gap_get_cod_major_dev(cod) == ESP_BT_COD_MAJOR_DEV_PHONE)) {
+        return;
+    }
+
+    memcpy(p_dev->bda, param->disc_res.bda, ESP_BD_ADDR_LEN);
+    p_dev->dev_found = true;
+    for (int i = 0; i < param->disc_res.num_prop; i++) {
+        p = param->disc_res.prop + i;
+        switch (p->type) {
+        case ESP_BT_GAP_DEV_PROP_COD:
+            p_dev->cod = *(uint32_t *)(p->val);
+            break;
+        case ESP_BT_GAP_DEV_PROP_RSSI:
+            p_dev->rssi = *(int8_t *)(p->val);
+            break;
+        case ESP_BT_GAP_DEV_PROP_BDNAME: {
+            uint8_t len = (p->len > ESP_BT_GAP_MAX_BDNAME_LEN) ? ESP_BT_GAP_MAX_BDNAME_LEN :
+                          (uint8_t)p->len;
+            memcpy(p_dev->bdname, (uint8_t *)(p->val), len);
+            p_dev->bdname[len] = '\0';
+            p_dev->bdname_len = len;
+            break;
+        }
+        case ESP_BT_GAP_DEV_PROP_EIR: {
+            memcpy(p_dev->eir, (uint8_t *)(p->val), p->len);
+            p_dev->eir_len = p->len;
+            break;
+        }
+        default:
+            break;
+        }
+    }
+
+    if (p_dev->eir && p_dev->bdname_len == 0) {
+        get_name_from_eir(p_dev->eir, p_dev->bdname, &p_dev->bdname_len);
+        Log.verbose("Found a target device, address %s, name %s", bda_str, (char *)(p_dev->bdname));
+        // p_dev->state = APP_GAP_STATE_DEVICE_DISCOVER_COMPLETE;
+        // Log.verbose("Cancel device discovery ...");
+        // esp_bt_gap_cancel_discovery();
+    }
+}
+
+
 void callback_esp32_gap(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
   char bda_str[18];
   char uuid_str[37];
@@ -548,6 +699,7 @@ void callback_esp32_gap(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *para
         param->disc_res.bda[4],
         param->disc_res.bda[5]);
       Log.notice(F("BT Device found %s"),bda_str);
+      update_device_info(param);
 
       break;
     default:
@@ -596,11 +748,12 @@ void setup() {
   setup_esp32();
 #endif
   setled(255, 128, 0);
-  setup_wifi();
-  setup_mqtt();
-  setled(0, 255, 0);
-  delay(1000);
-  setled(0,0,0);
+  if (setup_wifi()) {
+    setup_mqtt();
+    setled(0, 255, 0);
+    delay(1000);
+    setled(0,0,0);
+  }
 }
 
 void loop_publish_voltage(){
