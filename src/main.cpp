@@ -26,6 +26,7 @@
 #define I2CSDA 4  //D2 gruen
 #define I2CSCL 5  //D1 gelb
 ADC_MODE(ADC_VCC);
+
 #elif defined (ARDUINO_ARCH_ESP32)
 #include <WiFi.h>
 #include <SPIFFS.h>
@@ -57,7 +58,9 @@ typedef struct {
 static app_gap_cb_t m_dev_info;
 
 #else
+
 #pragma message ("unknow build enviroment")
+#error
 #endif
 
 // Board dependencies
@@ -419,13 +422,15 @@ void setup_i2c() {
   Wire.begin(I2CSDA, I2CSCL);
 
   // Try for DISPLAY
+#if BOARD == heltec
   pinMode(16,OUTPUT);
   digitalWrite(16,LOW);
   delay(100);
   digitalWrite(16,HIGH);
-
+#endif
 
   for(address = 1; address < 127; address++ ) {
+    Log.verbose(F("Trying %d"),address);
     Wire.beginTransmission(address);
     error = Wire.endTransmission();
 
@@ -753,6 +758,8 @@ void setup() {
     setled(0, 255, 0);
     delay(1000);
     setled(0,0,0);
+  } else {
+    setled(2,1,0);
   }
 }
 
