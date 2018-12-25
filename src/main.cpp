@@ -64,7 +64,7 @@ static app_gap_cb_t m_dev_info;
 #endif
 
 // Board dependencies
-#if BOARD == heltec
+#if defined(BOARD_HELTEC)
 #define I2CSDA 4  //D2 gruen
 #define I2CSCL 15  //D1 gelb
 #endif
@@ -422,7 +422,7 @@ void setup_i2c() {
   Wire.begin(I2CSDA, I2CSCL);
 
   // Try for DISPLAY
-#if BOARD == heltec
+#if defined(BOARD_HELTEC)
   pinMode(16,OUTPUT);
   digitalWrite(16,LOW);
   delay(100);
