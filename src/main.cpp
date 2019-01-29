@@ -81,6 +81,7 @@ static app_gap_cb_t m_dev_info;
 #include <Adafruit_NeoPixel.h>
 #include "Adafruit_VEML6070.h"
 #include "Adafruit_ADS1015.h"
+#include "Adafruit_VL53L0X.h"
 #include <U8x8lib.h>
 
 // Global defines
@@ -93,6 +94,7 @@ Adafruit_Si7021 si7021;
 Adafruit_BME280 bme280;
 Adafruit_TSL2561_Unified tsl2561 = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT);
 Adafruit_VEML6070 veml = Adafruit_VEML6070();
+Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 Adafruit_ADS1115 ads1115;
 Adafruit_NeoPixel led = Adafruit_NeoPixel(NROFLEDS, NEOPIXEL, NEO_GRB + NEO_KHZ800);
 WiFiClient espClient;
@@ -100,6 +102,8 @@ PubSubClient client;
 U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
 
 unsigned transmission_delay = 60; // seconds
+uint32_t led_current_color;
+
 
 // Strings for dynamic config
 String Smyname, Spass, Sssid, Smqttserver, Ssite, Sroom, Smqttuser, Smqttpass;
@@ -114,9 +118,11 @@ bool tsl2561_found= false;
 bool voltage_found= true;
 bool u8x8_found = false;
 bool veml_found = false;
+bool lox_found = false;
 bool ads1115_found = false;
 bool rtc_init_done = false;
 bool rtc_alarm_raised = false;
+bool light_on = true;
 
 // Flags for display
 #define DISPLAY_OFF 0
@@ -125,6 +131,7 @@ bool rtc_alarm_raised = false;
 #define DISPLAY_AIRPRESSURE 3
 #define DISPLAY_LUX 4
 #define DISPLAY_STRING 5
+#define DISPLAY_DISTANCE 6
 
 unsigned int display_what = DISPLAY_TEMPERATURE;
 
@@ -139,17 +146,24 @@ boolean setup_wifi();
 // LED routines
 void setled(byte r, byte g, byte b) {
   led.setPixelColor(0, r, g, b);
-  led.show();
+  led_current_color = led.Color(r,g,b);
+  if (light_on) {
+    led.show();
+  }
 }
 
 void setled(byte n, byte r, byte g, byte b) {
   led.setPixelColor(n, r, g, b);
-  led.show();
+  if (n == 0)
+    led_current_color = led.Color(r,g,b);
+  if (light_on) {
+    led.show();
+  }
 }
 
 void setled(byte n, byte r, byte g, byte b, byte show) {
   led.setPixelColor(n, r, g, b);
-  if (show) {
+  if (light_on && show) {
     led.show();
   }
 }
@@ -292,6 +306,8 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
       display_what = DISPLAY_AIRPRESSURE;
     } else if (in[1] == F("temperature")) {
       display_what = DISPLAY_TEMPERATURE;
+    } else if (in[1] == F("distance")) {
+      display_what = DISPLAY_DISTANCE;
     } else if (in[1] == "off") {
       u8x8.clearDisplay();
       display_what = DISPLAY_OFF;
@@ -440,6 +456,11 @@ void setup_i2c() {
     if (error == 0) {
       Log.trace("I2C device found at address 0x%x",address);
 
+      if (address == 0x29) {
+        lox_found = lox.begin();
+        Log.notice(F("LOX found? %T"),lox_found);
+      }
+
       if (address == 0x39) {
         tsl2561 = Adafruit_TSL2561_Unified(address);
         tsl2561_found = tsl2561.begin();
@@ -451,6 +472,7 @@ void setup_i2c() {
           tsl2561.setIntegrationTime(TSL2561_INTEGRATIONTIME_101MS);
         }
       }
+
       if (address == 0x38) {
         // VEML6070
         veml.begin(VEML6070_1_T);
@@ -803,6 +825,47 @@ void loop_publish_veml6070() {
   }
 }
 
+int loop_get_lox_distance() {
+  if (lox_found) {
+    VL53L0X_RangingMeasurementData_t measure;
+    lox.rangingTest(&measure);
+    if (measure.RangeStatus != 4) {
+      return measure.RangeMilliMeter;
+    }
+  }
+  return -1;
+}
+
+void lights_on(int dist) {
+  bool x = false;
+
+ if ((dist > 0) && (dist < 500))
+    x = true;
+
+  if (x == light_on)
+    return;
+
+  Log.verbose(F("Lights on? %T %d mm"),x,dist);
+
+  light_on = x;
+
+  if (x) {
+    led.setPixelColor(0, led_current_color);
+    led.show();
+  } else {
+    led_current_color = led.getPixelColor(0);
+    led.clear();
+    led.show();
+  }
+
+  if (u8x8_found) {
+    if (x) {
+      u8x8.setContrast(255);
+    } else {
+      u8x8.setContrast(0);
+    }
+  }
+}
 
 
 void loop() {
@@ -834,32 +897,49 @@ void loop() {
     last_transmission = millis();
   }
 
-  if (u8x8_found && ((millis() - last_display) > (1000*30))) {
+  if (lox_found) {
+    int distance = loop_get_lox_distance();
+    lights_on(distance);
+  }
+
+  if (u8x8_found && light_on && (((millis() - last_display) > (1000*30)) ||
+      (display_what == DISPLAY_DISTANCE))) {
     char s[10];
     u8x8.setFont(u8x8_font_amstrad_cpc_extended_r);
     switch(display_what) {
       case DISPLAY_TEMPERATURE:
         if (bme280_found) {
           snprintf(s, 9, "%.1f C", bme280.readTemperature());
+          u8x8.clearDisplay();
+          u8x8.draw2x2String(1, 3, s);
         }
-        u8x8.clearDisplay();
-        u8x8.draw2x2String(1, 3, s);
         break;
       case DISPLAY_HUMIDITY:
         if (bme280_found) {
           snprintf(s, 9, "%.1f %%", bme280.readHumidity());
+          u8x8.clearDisplay();
+          u8x8.draw2x2String(1, 3, s);
         }
-        u8x8.clearDisplay();
-        u8x8.draw2x2String(1, 3, s);
         break;
       case DISPLAY_AIRPRESSURE:
         if (bme280_found) {
           snprintf(s, 9, "%d hPa", (int)(bme280.readPressure() / 100));
+          u8x8.clearDisplay();
+          u8x8.draw2x2String(1, 3, s);
         }
-        u8x8.clearDisplay();
-        u8x8.draw2x2String(1, 3, s);
         break;
-
+      case DISPLAY_DISTANCE:
+        if (lox_found) {
+          int dist = loop_get_lox_distance();
+          if (dist >= 0) {
+            snprintf(s,9,"%d mm",dist);
+          } else {
+            snprintf(s,9,"---- mm");
+          }
+          u8x8.clearDisplay();
+          u8x8.draw2x2String(1, 3, s);
+        }
+        break;
     }
 
     last_display = millis();
