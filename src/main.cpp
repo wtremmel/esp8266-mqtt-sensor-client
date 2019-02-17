@@ -82,6 +82,7 @@ static app_gap_cb_t m_dev_info;
 #include "Adafruit_VEML6070.h"
 #include "Adafruit_ADS1015.h"
 #include "Adafruit_VL53L0X.h"
+#include "Adafruit_TCS34725.h"
 #include <U8x8lib.h>
 
 // Global defines
@@ -97,6 +98,7 @@ Adafruit_VEML6070 veml = Adafruit_VEML6070();
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 Adafruit_ADS1115 ads1115;
 Adafruit_NeoPixel led = Adafruit_NeoPixel(NROFLEDS, NEOPIXEL, NEO_GRB + NEO_KHZ800);
+Adafruit_TCS34725 tcs = Adafruit_TCS34725();
 WiFiClient espClient;
 PubSubClient client;
 U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
@@ -119,10 +121,13 @@ bool voltage_found= true;
 bool u8x8_found = false;
 bool veml_found = false;
 bool lox_found = false;
+bool tcs_found = false;
 bool ads1115_found = false;
 bool rtc_init_done = false;
 bool rtc_alarm_raised = false;
 bool light_on = true;
+
+bool color_watch = false;
 
 // Flags for display
 #define DISPLAY_OFF 0
@@ -142,6 +147,7 @@ unsigned long last_display = 0;
 
 // forward declarations
 boolean setup_wifi();
+void loop_publish_tcs34725();
 
 // LED routines
 void setled(byte r, byte g, byte b) {
@@ -266,6 +272,36 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
       setled(in[1].toInt(),in[2].toInt(),in[3].toInt());
     } else if (wordcounter == 4) {
       setled(in[1].toInt(),in[2].toInt(),in[3].toInt(),in[4].toInt());
+    }
+  }
+
+  if (in[0] == "sensor") {
+    // sensor name command
+    if (wordcounter >= 1) {
+      if (tcs_found && in[1] == "color") {
+        if (wordcounter == 1) {
+          loop_publish_tcs34725();
+        }
+        if (wordcounter == 2) {
+          if (in[2] == "enable")
+            color_watch = 1;
+          if (in[2] == "disable")
+            color_watch = 0;
+        }
+        if (wordcounter == 3) {
+          if (in[2] == "gain") {
+            tcs.setGain((tcs34725Gain_t) atoi(in[3].c_str()));
+          }
+          if (in[2] == "time") {
+            tcs.setIntegrationTime((tcs34725IntegrationTime_t) atoi(in[3].c_str()));
+            tcs.begin();
+          }
+          if (in[2] == "interrupt") {
+            tcs.setInterrupt(in[3] == "on");
+
+          }
+        }
+      }
     }
   }
 
@@ -424,6 +460,7 @@ void setup_i2c() {
   byte error, address;
 
 // 0x29 TSL45315 (Light)
+// 0x29  Color
 // 0x38 VEML6070 (Light)
 // 0x39 TSL2561
 // 0x3c Display
@@ -439,6 +476,7 @@ void setup_i2c() {
 
   Log.notice("Scanning i2c bus");
   Wire.begin(I2CSDA, I2CSCL);
+  Wire.setClock(10000);
 
   // Try for DISPLAY
 #if defined(BOARD_HELTEC)
@@ -457,8 +495,13 @@ void setup_i2c() {
       Log.trace("I2C device found at address 0x%x",address);
 
       if (address == 0x29) {
-        lox_found = lox.begin();
-        Log.notice(F("LOX found? %T"),lox_found);
+        tcs_found = tcs.begin();
+        Log.notice(F("TCS found? %T"),tcs_found);
+
+        if (!tcs_found) {
+          lox_found = lox.begin();
+          Log.notice(F("LOX found? %T"),lox_found);
+        }
       }
 
       if (address == 0x39) {
@@ -825,6 +868,33 @@ void loop_publish_veml6070() {
   }
 }
 
+void loop_publish_tcs34725() {
+  if (tcs_found) {
+    uint16_t r,g,b,c;
+    tcs.getRawData(&r,&g,&b,&c);
+
+    Log.verbose(F("TCS Color raw: R=%d G=%d B=%d C=%d"),r,g,b,c);
+    uint16_t minval = min(min(r,g),b);
+    uint16_t maxval = max(max(r,g),b);
+
+    int d1 = abs(r-g);
+    int d2 = abs(r-b);
+    int d3 = abs(g-b);
+
+    int maxdist = max(max(d1,d2),d3);
+    int mindist = min(min(d1,d2),d3);
+
+    if (maxdist > 40) {
+      r = map(r,minval,maxval,0,255);
+      g = map(g,minval,maxval,0,255);
+      b = map(b,minval,maxval,0,255);
+    }
+
+    setled(r,g,b);
+    Log.verbose(F("TCS Color adj: R=%d G=%d B=%d C=%d"),r,g,b,c);
+  }
+}
+
 int loop_get_lox_distance() {
   if (lox_found) {
     VL53L0X_RangingMeasurementData_t measure;
@@ -886,6 +956,8 @@ void loop() {
 #endif
 
   // read sensors and publish values
+  if (color_watch)
+    loop_publish_tcs34725();
 
   if ((millis() - last_transmission) > (transmission_delay * 1000)) {
   // Voltage
