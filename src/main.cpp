@@ -200,34 +200,33 @@ void log_config () {
 }
 
 void write_config () {
-  StaticJsonBuffer<512> jsonBuffer;
-  JsonObject& root = jsonBuffer.createObject();
-  root["myname"] = Smyname;
-  root["flipped"] = Bflipped;
-  JsonObject& network = root.createNestedObject("network");
+  StaticJsonDocument<512> doc;
+  doc["myname"] = Smyname;
+  doc["flipped"] = Bflipped;
+  JsonObject network = doc.createNestedObject("network");
   network["pass"] = Spass;
   network["ssid"] = Sssid;
-  JsonObject& mqtt = root.createNestedObject("mqtt");
+  JsonObject mqtt = doc.createNestedObject("mqtt");
   mqtt["server"] = Smqttserver;
   mqtt["user"] = Smqttuser;
   mqtt["pass"] = Smqttpass;
   mqtt["port"] = Imqttport;
-  JsonObject& location = root.createNestedObject("location");
+  JsonObject location = doc.createNestedObject("location");
   location["site"] = Ssite;
   location["room"] = Sroom;
 
   Log.notice(F("Writing new config file"));
-  root.prettyPrintTo(Serial);
+  serializeJsonPretty(doc,Serial);
 
   SPIFFS.begin();
   File f = SPIFFS.open("/config.json","w");
   if (!f) {
     Log.error(F("Open of config file for writing failed"));
   } else {
-    if (root.printTo(f) == 0) {
-      Log.error(F("Writing object into file failed"));
-    } else {
+    if (serializeJson(doc,f)) {
       Log.notice(F("Written new config. Now reboot"));
+    } else {
+      Log.error(F("Writing object into file failed"));
     }
     f.close();
   }
@@ -426,10 +425,11 @@ void mqtt_publish(char *topic, char *msg) {
   }
   client.loop();
 
-  Log.verbose("MQTT Publish message [%s]:%s",topic,msg);
 
   char mytopic[50];
   snprintf(mytopic, 50, "/%s/%s/%s", Ssite.c_str(), Sroom.c_str(),topic);
+  Log.verbose("MQTT Publish message [%s]:%s",mytopic,msg);
+
   client.publish(mytopic, msg);
 }
 
@@ -524,10 +524,11 @@ void setup_i2c() {
         }
         Log.notice(F("VEML6070 found? %T"), veml_found);
       }
+
       if (address == 0x3c) {
         u8x8_found = u8x8.begin();
+        Log.notice("U8xu found? %T",u8x8_found);
         if (u8x8_found) {
-          Log.notice("U8xu found? %T",u8x8_found);
           u8x8.clear();
           u8x8.setFont(u8x8_font_chroma48medium8_r);
           u8x8.setFlipMode(Bflipped);
@@ -580,13 +581,17 @@ void setup_readconfig() {
     Log.error("Cannot open config file");
     return;
   }
-  StaticJsonBuffer<512> jsonBuffer;
+  StaticJsonDocument<512> jsonBuffer;
 
  // Parse the root object
- JsonObject &root = jsonBuffer.parseObject(f);
+ // JsonObject root = jsonBuffer.parseObject(f);
 
- if (!root.success())
-   Log.error("Failed to read file");
+ auto error = deserializeJson(jsonBuffer,f);
+ if (error) {
+   Log.error(F("Failed to read file %s"),error.c_str());
+ }
+
+ JsonObject root = jsonBuffer.as<JsonObject>();
 
  // Copy values from the JsonObject to the Config
    Smyname = root["myname"].as<String>();
