@@ -9,7 +9,7 @@
 // #define ESP7  // Hausanschlussraum
 // #define ESP8 // Fernsehzimmer
 // #define ESP9 // Heizraum
-// #define ESP10 // Büro Wolfgang / Schifferstadt / Flur 1.OG
+// #define ESP10 // Flur 1.OG
 // #define ESP11 // Lolin32 Lite
 // #define ESP12 // Schlafzimmer
 // #define ESP13 // Lichterkette / Uhr

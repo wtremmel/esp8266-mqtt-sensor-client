@@ -1,17 +1,17 @@
 {
-  "myname":"esp33",
+  "myname":"esp16",
   "network": {
     "ssid":"AnkhMorpork",
     "pass":"TheC0l0r0fMag1c"
   },
   "mqtt":{
-    "user":"esp33",
+    "user":"esp16",
     "pass":"emptyfornow",
     "server":"pi3.garf.de",
     "port":1883
   },
   "location":{
     "site":"Chattenweg5",
-    "room":"Test33"
+    "room":"EG-Flur"
   }
 }
