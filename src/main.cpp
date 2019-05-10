@@ -137,8 +137,9 @@ bool color_watch = false;
 #define DISPLAY_LUX 4
 #define DISPLAY_STRING 5
 #define DISPLAY_DISTANCE 6
+#define DISPLAY_TEMPHUM 7
 
-unsigned int display_what = DISPLAY_TEMPERATURE;
+unsigned int display_what = DISPLAY_TEMPHUM;
 
 // Timer variables
 unsigned long now;
@@ -984,6 +985,16 @@ void loop() {
     char s[10];
     u8x8.setFont(u8x8_font_amstrad_cpc_extended_r);
     switch(display_what) {
+      case DISPLAY_TEMPHUM:
+        if (bme280_found) {
+          char h[10];
+          snprintf(s, 9, "%.1f C", bme280.readTemperature());
+          snprintf(h, 9, "%.1f %%", bme280.readHumidity());
+          u8x8.clearDisplay();
+          u8x8.draw2x2String(1, 1, s);
+          u8x8.draw2x2String(1, 4, h);
+        }
+        break;
       case DISPLAY_TEMPERATURE:
         if (bme280_found) {
           snprintf(s, 9, "%.1f C", bme280.readTemperature());
