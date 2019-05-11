@@ -140,6 +140,7 @@ bool color_watch = false;
 #define DISPLAY_TEMPHUM 7
 
 unsigned int display_what = DISPLAY_TEMPHUM;
+bool display_refresh = true;
 
 // Timer variables
 unsigned long now;
@@ -336,6 +337,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
 
   if (in[0] == "display" && wordcounter >= 1) {
     last_display = 0;
+    display_refresh = true;
     if (in[1] == "humidity") {
       display_what = DISPLAY_HUMIDITY;
     } else if (in[1] == "airpressure") {
@@ -344,6 +346,8 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
       display_what = DISPLAY_TEMPERATURE;
     } else if (in[1] == F("distance")) {
       display_what = DISPLAY_DISTANCE;
+    } else if (in[1] == F("temphum")) {
+      display_what = DISPLAY_TEMPHUM;
     } else if (in[1] == "off") {
       u8x8.clearDisplay();
       display_what = DISPLAY_OFF;
@@ -946,6 +950,8 @@ void lights_on(int dist) {
 
 void loop() {
   // put your main code here, to run repeatedly:
+  client.loop();
+
   if (!client.connected()) {
     now = millis();
     if (now - lastReconnectAttempt > 5000) {
@@ -964,26 +970,39 @@ void loop() {
   // read sensors and publish values
   if (color_watch)
     loop_publish_tcs34725();
+  client.loop();
 
   if ((millis() - last_transmission) > (transmission_delay * 1000)) {
   // Voltage
     loop_publish_voltage();
+    client.loop();
     loop_publish_tsl2561();
+    client.loop();
     loop_publish_bme280();
+    client.loop();
     loop_publish_veml6070();
-
+    client.loop();
     last_transmission = millis();
   }
+  client.loop();
 
   if (lox_found) {
     int distance = loop_get_lox_distance();
     lights_on(distance);
   }
+  client.loop();
 
-  if (u8x8_found && light_on && (((millis() - last_display) > (1000*30)) ||
-      (display_what == DISPLAY_DISTANCE))) {
+  if (u8x8_found &&
+      light_on &&
+      (((millis() - last_display) > (1000*30)) ||
+       (display_what == DISPLAY_DISTANCE) ||
+       display_refresh
+     )
+    ) {
     char s[10];
     u8x8.setFont(u8x8_font_amstrad_cpc_extended_r);
+    display_refresh = false;
+    client.loop();
     switch(display_what) {
       case DISPLAY_TEMPHUM:
         if (bme280_found) {
@@ -1032,4 +1051,6 @@ void loop() {
 
     last_display = millis();
   }
+  client.loop();
+
 }
