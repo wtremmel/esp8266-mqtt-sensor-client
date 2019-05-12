@@ -15,6 +15,8 @@
 // #define ESP13 // Lichterkette / Uhr
 // #define ESP14 // Display
 // #define ESP15 // Keller
+// #define ESP16 // Flur EG
+// #define ESP17 // DECIX Office
 // ESP16 Erdgeschoss Flur
 
 #include <Arduino.h>
@@ -140,6 +142,7 @@ bool color_watch = false;
 #define DISPLAY_TEMPHUM 7
 
 unsigned int display_what = DISPLAY_TEMPHUM;
+unsigned int display_brightness = 1;
 bool display_refresh = true;
 
 // Timer variables
@@ -360,6 +363,10 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
       u8x8.clearDisplay();
       u8x8.setFlipMode(wordcounter > 1);
       Bflipped = (wordcounter > 1);
+    } else if (in[1] == F("brightness") && wordcounter >= 2) {
+      display_brightness = in[2].toInt();
+      Log.verbose(F("Setting brightness to %d"),display_brightness);
+      u8x8.setContrast(display_brightness);
     } else { // String
       // large or small?
       // small, if a line is longer than 8 chars or if there are more than 3 lines
@@ -417,7 +424,7 @@ boolean mqtt_reconnect() {
     // and to my location
     String mylocation = "/" + Ssite + "/cmd";
     client.subscribe(mylocation.c_str());
-    String myroom = "/" + Ssite + "/" + Sroom + "cmd";
+    String myroom = "/" + Ssite + "/" + Sroom + "/cmd";
     client.subscribe(myroom.c_str());
     delay(10);
   } else {
@@ -612,7 +619,7 @@ void setup_readconfig() {
    Smyname = root["myname"].as<String>();
    Bflipped = root["display"]["flipped"];
    display_what = root["display"]["content"];
-   display_bright=root["display"]["brightness"];
+   display_brightness=root["display"]["brightness"];
    Spass = root["network"]["pass"].as<String>();
    Sssid = root["network"]["ssid"].as<String>();
    Smqttserver = root["mqtt"]["server"].as<String>();
@@ -954,7 +961,7 @@ void lights_on(int dist) {
     if (x) {
       u8x8.setContrast(255);
     } else {
-      u8x8.setContrast(0);
+      u8x8.setContrast(display_brightness);
     }
   }
 }
@@ -1060,7 +1067,7 @@ void loop() {
         }
         break;
     }
-
+    u8x8.setContrast(display_brightness);
     last_display = millis();
   }
   client.loop();
