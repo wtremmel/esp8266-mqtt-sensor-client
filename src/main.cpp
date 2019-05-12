@@ -198,13 +198,18 @@ void log_config () {
   Log.verbose("Smqttpass = %s",Smqttpass.c_str());
   Log.verbose("Imqttport = %d",Imqttport);
   Log.verbose(F("Bflipped = %t"),Bflipped);
+  Log.verbose(F("Display = %d"),display_what);
+  Log.verbose(F("Brightness = %d"),display_brightness);
 
 }
 
 void write_config () {
   StaticJsonDocument<512> doc;
   doc["myname"] = Smyname;
-  doc["flipped"] = Bflipped;
+  JsonObject display = doc.createNestedObject("display");
+  display["flipped"] = Bflipped;
+  display["brightness"] = display_brightness;
+  display["content"] =display_what;
   JsonObject network = doc.createNestedObject("network");
   network["pass"] = Spass;
   network["ssid"] = Sssid;
@@ -605,7 +610,9 @@ void setup_readconfig() {
 
  // Copy values from the JsonObject to the Config
    Smyname = root["myname"].as<String>();
-   Bflipped = root["flipped"];
+   Bflipped = root["display"]["flipped"];
+   display_what = root["display"]["content"];
+   display_bright=root["display"]["brightness"];
    Spass = root["network"]["pass"].as<String>();
    Sssid = root["network"]["ssid"].as<String>();
    Smqttserver = root["mqtt"]["server"].as<String>();
