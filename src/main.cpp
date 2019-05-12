@@ -409,6 +409,11 @@ boolean mqtt_reconnect() {
     delay(10);
     // ... and resubscribe to my name
     client.subscribe(Smyname.c_str());
+    // and to my location
+    String mylocation = "/" + Ssite + "/cmd";
+    client.subscribe(mylocation.c_str());
+    String myroom = "/" + Ssite + "/" + Sroom + "cmd";
+    client.subscribe(myroom.c_str());
     delay(10);
   } else {
     Log.error("MQTT connect failed, rc=%d",client.state());
