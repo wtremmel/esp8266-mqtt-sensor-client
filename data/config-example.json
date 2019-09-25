@@ -1,0 +1,22 @@
+{
+  "myname":"name-of-device",
+  "network": {
+    "ssid":"wifi-ssid-to-connect-to",
+    "pass":"wifi-password"
+  },
+  "mqtt":{
+    "user":"name-of-device",
+    "pass":"password-of-mqtt-server",
+    "server":"192.0.2.123",
+    "port":3883
+  },
+  "location":{
+    "site":"location-of-device",
+    "room":"room-of-device"
+  },
+  "display":{
+    "flipped":false,
+    "brightness":1,
+    "content":7
+  }
+}
