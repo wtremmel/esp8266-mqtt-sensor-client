@@ -897,6 +897,13 @@ void loop_publish_veml6070() {
   }
 }
 
+void loop_publish_si7021() {
+  if (si7021_found) {
+    mqtt_publish("temperature", si7021.readTemperature());
+    mqtt_publish("humidity", si7021.readHumidity());
+  }
+}
+
 void loop_publish_tcs34725() {
   if (tcs_found) {
     uint16_t r,g,b,c;
@@ -1000,6 +1007,8 @@ void loop() {
     loop_publish_bme280();
     client.loop();
     loop_publish_veml6070();
+    client.loop();
+    loop_publish_si7021();
     client.loop();
     last_transmission = millis();
   }
