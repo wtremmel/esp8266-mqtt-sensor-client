@@ -17,7 +17,7 @@
 // #define ESP15 // Keller
 // #define ESP16 // Flur EG
 // #define ESP17 // DECIX Office
-// ESP16 Erdgeschoss Flur
+// #define EPS18 // Flur 2.OG
 
 #include <Arduino.h>
 #include <ArduinoLog.h>
@@ -91,7 +91,6 @@ static app_gap_cb_t m_dev_info;
 #define NEOPIXEL 14 //D5
 #define NROFLEDS 10
 
-
 // Global Objects
 Adafruit_Si7021 si7021;
 Adafruit_BME280 bme280;
@@ -104,6 +103,8 @@ Adafruit_TCS34725 tcs = Adafruit_TCS34725();
 WiFiClient espClient;
 PubSubClient client;
 U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
+int pirState = LOW;
+uint8_t pirInput = 12;
 
 unsigned transmission_delay = 60; // seconds
 uint32_t led_current_color;
@@ -128,6 +129,7 @@ bool ads1115_found = false;
 bool rtc_init_done = false;
 bool rtc_alarm_raised = false;
 bool light_on = true;
+bool pir_found = true;
 
 bool color_watch = false;
 
@@ -203,7 +205,8 @@ void log_config () {
   Log.verbose(F("Bflipped = %t"),Bflipped);
   Log.verbose(F("Display = %d"),display_what);
   Log.verbose(F("Brightness = %d"),display_brightness);
-
+  if (pir_found)
+    Log.verbose(F("Motion detector = %d"),pirInput);
 }
 
 void write_config () {
@@ -224,6 +227,9 @@ void write_config () {
   JsonObject location = doc.createNestedObject("location");
   location["site"] = Ssite;
   location["room"] = Sroom;
+  if (pir_found) {
+    doc["motion"] = pirInput;
+  }
 
   Log.notice(F("Writing new config file"));
   serializeJsonPretty(doc,Serial);
@@ -595,6 +601,12 @@ void setup_led() {
   led.show();
 }
 
+// setup PIR motion detector
+void setup_pir() {
+  pinMode(pirInput, INPUT);
+  pirState = digitalRead(pirInput);
+}
+
 // read the config file and parse its data
 void setup_readconfig() {
   SPIFFS.begin();
@@ -628,7 +640,11 @@ void setup_readconfig() {
    Smqttuser = root["mqtt"]["user"].as<String>();
    Smqttpass = root["mqtt"]["pass"].as<String>();
    Imqttport = root["mqtt"]["port"];
-
+   if (pirInput = root["motion"]) {
+     pir_found = true;
+   } else {
+     pir_found = false;
+   }
 
   f.close();
   SPIFFS.end();
@@ -851,6 +867,8 @@ void setup() {
   setup_readconfig();
   log_config();
   setup_i2c();
+  if (pir_found)
+    setup_pir();
 #ifdef ARDUINO_ARCH_ESP32
   setup_esp32();
 #endif
@@ -973,6 +991,29 @@ void lights_on(int dist) {
   }
 }
 
+// read PIR if it exists
+void loop_pir() {
+  if (pir_found) {
+    int pir_old = pirState;
+    pirState = digitalRead(pirInput);
+    // Low -> Low
+    if (pir_old == LOW && pirState == LOW)
+      return;
+    // Low -> High
+    if (pir_old == LOW && pirState == HIGH) {
+      mqtt_publish("motion", "started");
+    }
+
+    // High -> High
+    if (pir_old == HIGH && pirState == HIGH)
+      return;
+    // High -> Low
+    if (pir_old == HIGH && pirState == LOW) {
+      mqtt_publish("motion", "stopped");
+    }
+  }
+}
+
 
 void loop() {
   // put your main code here, to run repeatedly:
@@ -1012,6 +1053,9 @@ void loop() {
     client.loop();
     last_transmission = millis();
   }
+  client.loop();
+  if (pir_found)
+    loop_pir();
   client.loop();
 
   if (lox_found) {
