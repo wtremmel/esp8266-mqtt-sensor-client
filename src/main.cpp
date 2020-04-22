@@ -17,7 +17,8 @@
 // #define ESP15 // Keller
 // #define ESP16 // Flur EG
 // #define ESP17 // DECIX Office
-// #define EPS18 // Flur 2.OG
+// #define ESP18 // Flur 2.OG
+// #define ESP19 // Loggia
 
 #include <Arduino.h>
 #include <ArduinoLog.h>
