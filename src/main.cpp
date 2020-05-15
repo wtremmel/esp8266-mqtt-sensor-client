@@ -469,10 +469,15 @@ void mqtt_publish(char *topic, char *msg) {
 
 void mqtt_publish(const __FlashStringHelper *topic, const __FlashStringHelper *msg) {
   char a[32],b[32];
-
   snprintf(a,31,"%s",topic);
   snprintf(b,31,"%s",msg);
   mqtt_publish(a,b);
+}
+
+void mqtt_publish(const __FlashStringHelper *topic, char *msg) {
+  char a[32];
+  snprintf(a,31,"%s",topic);
+  mqtt_publish(a,msg);
 }
 
 void mqtt_publish(char *topic, int i) {
@@ -482,6 +487,12 @@ void mqtt_publish(char *topic, int i) {
 }
 
 void mqtt_publish(char *topic, uint32_t i) {
+  char buf[32];
+  snprintf(buf,31,"%lu",i);
+  mqtt_publish(topic,buf);
+}
+
+void mqtt_publish(const __FlashStringHelper *topic, uint32_t i) {
   char buf[32];
   snprintf(buf,31,"%lu",i);
   mqtt_publish(topic,buf);
@@ -899,7 +910,7 @@ void setup() {
 }
 
 void publish_status() {
-  const __FlashStringHelper *status = F("status");
+  const __FlashStringHelper *status = F("status/sensors");
 
   if (si7021_found) mqtt_publish(status,F("si7021_found"));
   if (bme280_found) mqtt_publish(status,F("bme280_found"));
@@ -911,6 +922,13 @@ void publish_status() {
   if (tcs_found) mqtt_publish(status,F("tcs_found"));
   if (ads1115_found) mqtt_publish(status,F("ads1115_found"));
   if (pir_found) mqtt_publish(status,F("pir_found"));
+#if defined(ARDUINO_ARCH_ESP8266)
+  mqtt_publish(F("status/ChipID"),ESP.getChipId());
+  mqtt_publish(F("status/ResetReason"),ESP.getResetReason());
+  mqtt_publish(F("status/SdkVersion"),ESP.getSdkVersion());
+  mqtt_publish(F("status/SketchSize"),ESP.getSketchSize());
+  mqtt_publish(F("status/CycleCount"),ESP.getCycleCount());
+#endif
 
 }
 
