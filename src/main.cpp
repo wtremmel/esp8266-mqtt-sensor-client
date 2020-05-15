@@ -156,6 +156,7 @@ unsigned long last_display = 0;
 // forward declarations
 boolean setup_wifi();
 void loop_publish_tcs34725();
+void publish_status();
 
 // LED routines
 void setled(byte r, byte g, byte b) {
@@ -280,6 +281,10 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
 
   if (in[0] == "reboot") {
     ESP.restart();
+  }
+
+  if (in[0] == "status") {
+    publish_status();
   }
 
   if (in[0] == "led") {
@@ -460,6 +465,14 @@ void mqtt_publish(char *topic, char *msg) {
   Log.verbose("MQTT Publish message [%s]:%s",mytopic,msg);
 
   client.publish(mytopic, msg);
+}
+
+void mqtt_publish(const __FlashStringHelper *topic, const __FlashStringHelper *msg) {
+  char a[32],b[32];
+
+  snprintf(a,31,"%s",topic);
+  snprintf(b,31,"%s",msg);
+  mqtt_publish(a,b);
 }
 
 void mqtt_publish(char *topic, int i) {
@@ -882,6 +895,23 @@ void setup() {
   } else {
     setled(2,1,0);
   }
+  publish_status();
+}
+
+void publish_status() {
+  const __FlashStringHelper *status = F("status");
+
+  if (si7021_found) mqtt_publish(status,F("si7021_found"));
+  if (bme280_found) mqtt_publish(status,F("bme280_found"));
+  if (tsl2561_found) mqtt_publish(status,F("tsl2561_found"));
+  if (voltage_found) mqtt_publish(status,F("voltage_found"));
+  if (u8x8_found) mqtt_publish(status,F("u8x8_found"));
+  if (veml_found) mqtt_publish(status,F("veml_found"));
+  if (lox_found) mqtt_publish(status,F("lox_found"));
+  if (tcs_found) mqtt_publish(status,F("tcs_found"));
+  if (ads1115_found) mqtt_publish(status,F("ads1115_found"));
+  if (pir_found) mqtt_publish(status,F("pir_found"));
+
 }
 
 void loop_publish_voltage(){
