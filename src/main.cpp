@@ -80,6 +80,7 @@ static app_gap_cb_t m_dev_info;
 #include <Wire.h>
 #include "Adafruit_Si7021.h"
 #include "Adafruit_BME280.h"
+#include "Adafruit_BME680.h"
 #include "Adafruit_TSL2561_U.h"
 #include <Adafruit_NeoPixel.h>
 #include "Adafruit_VEML6070.h"
@@ -95,6 +96,7 @@ static app_gap_cb_t m_dev_info;
 // Global Objects
 Adafruit_Si7021 si7021;
 Adafruit_BME280 bme280;
+Adafruit_BME680 bme680;
 Adafruit_TSL2561_Unified tsl2561 = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT);
 Adafruit_VEML6070 veml = Adafruit_VEML6070();
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
@@ -120,6 +122,7 @@ bool Bflipped;
 // Flags for sensors found
 bool si7021_found = false;
 bool bme280_found = false;
+bool bme680_found = false;
 bool tsl2561_found= false;
 bool voltage_found= true;
 bool u8x8_found = false;
@@ -589,9 +592,19 @@ void setup_i2c() {
         Log.notice(F("ADS1115 found at 0x%x"),address);
       }
       if (address == 0x76 || address == 0x77) {
-        // BME280
-        bme280_found = bme280.begin(address);
-        Log.notice("BME280 found? %T at 0x%x",bme280_found,address);
+        // BME280 or BME680
+        bme680_found = bme680.begin(address);
+        if (bme680_found) {
+          bme680.setTemperatureOversampling(BME680_OS_8X);
+          bme680.setHumidityOversampling(BME680_OS_2X);
+          bme680.setPressureOversampling(BME680_OS_4X);
+          bme680.setIIRFilterSize(BME680_FILTER_SIZE_3);
+          bme680.setGasHeater(320, 150); // 320*C for 150 ms
+          Log.notice("BME680 found? %T at 0x%x",bme680_found,address);
+        } else {
+          bme280_found = bme280.begin(address);
+          Log.notice("BME280 found? %T at 0x%x",bme280_found,address);
+        }
       }
     }
   }
@@ -903,6 +916,7 @@ void publish_status() {
 
   if (si7021_found) mqtt_publish(status,F("si7021_found"));
   if (bme280_found) mqtt_publish(status,F("bme280_found"));
+  if (bme680_found) mqtt_publish(status,F("bme680_found"));
   if (tsl2561_found) mqtt_publish(status,F("tsl2561_found"));
   if (voltage_found) mqtt_publish(status,F("voltage_found"));
   if (u8x8_found) mqtt_publish(status,F("u8x8_found"));
@@ -939,6 +953,17 @@ void loop_publish_bme280() {
     mqtt_publish("humidity", bme280.readHumidity());
   }
 }
+
+void loop_publish_bme680() {
+  if (bme680_found && bme680.performReading()) {
+    mqtt_publish("temperature", bme680.temperature);
+    mqtt_publish("airpressure", bme680.pressure / 100.0F);
+    mqtt_publish("humidity", bme680.humidity);
+    mqtt_publish("airquality", bme680.gas_resistance / 1000.0F);
+  }
+}
+
+
 
 void loop_publish_veml6070() {
   if (veml_found) {
@@ -1077,6 +1102,8 @@ void loop() {
     loop_publish_tsl2561();
     client.loop();
     loop_publish_bme280();
+    client.loop();
+    loop_publish_bme680();
     client.loop();
     loop_publish_veml6070();
     client.loop();
