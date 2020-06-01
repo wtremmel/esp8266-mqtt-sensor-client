@@ -19,6 +19,7 @@
 // #define ESP17 // DECIX Office
 // #define ESP18 // Flur 2.OG
 // #define ESP19 // Loggia
+// #define ESP30 // DingDong
 
 #include <Arduino.h>
 #include <ArduinoLog.h>
