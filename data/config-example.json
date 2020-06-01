@@ -12,12 +12,14 @@
   },
   "location":{
     "site":"location-of-device",
-    "room":"room-of-device"
+    "room":"room-of-device",
+    "indoor":true
   },
   "display":{
     "flipped":false,
     "brightness":1,
     "content":7
   },
-  "motion":12
+  "motion":12,
+  "as3935_input":1
 }

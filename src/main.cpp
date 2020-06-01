@@ -19,6 +19,7 @@
 // #define ESP17 // DECIX Office
 // #define ESP18 // Flur 2.OG
 // #define ESP19 // Loggia
+// #define ESP31 // Test
 // #define ESP30 // DingDong
 
 #include <Arduino.h>
@@ -89,10 +90,13 @@ static app_gap_cb_t m_dev_info;
 #include "Adafruit_VL53L0X.h"
 #include "Adafruit_TCS34725.h"
 #include <U8x8lib.h>
+#include <SparkFun_AS3935.h>
 
 // Global defines
 #define NEOPIXEL 14 //D5
 #define NROFLEDS 10
+
+#define AS3935_ADDR 0x03
 
 // Global Objects
 Adafruit_Si7021 si7021;
@@ -102,6 +106,7 @@ Adafruit_TSL2561_Unified tsl2561 = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT);
 Adafruit_VEML6070 veml = Adafruit_VEML6070();
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 Adafruit_ADS1115 ads1115;
+SparkFun_AS3935 as3935(AS3935_ADDR);
 Adafruit_NeoPixel led = Adafruit_NeoPixel(NROFLEDS, NEOPIXEL, NEO_GRB + NEO_KHZ800);
 Adafruit_TCS34725 tcs = Adafruit_TCS34725();
 WiFiClient espClient;
@@ -109,6 +114,7 @@ PubSubClient client;
 U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
 int pirState = LOW;
 uint8_t pirInput = 12;
+uint8_t as3935_input = 1; // hardware int pin for AS3935
 
 unsigned transmission_delay = 60; // seconds
 uint32_t led_current_color;
@@ -118,6 +124,7 @@ uint32_t led_current_color;
 String Smyname, Spass, Sssid, Smqttserver, Ssite, Sroom, Smqttuser, Smqttpass;
 unsigned int Imqttport;
 bool Bflipped;
+bool Bindoor = true;
 
 
 // Flags for sensors found
@@ -135,6 +142,7 @@ bool rtc_init_done = false;
 bool rtc_alarm_raised = false;
 bool light_on = true;
 bool pir_found = true;
+bool as3935_found = false;
 
 bool color_watch = false;
 
@@ -209,10 +217,13 @@ void log_config () {
   Log.verbose("Smqttpass = %s",Smqttpass.c_str());
   Log.verbose("Imqttport = %d",Imqttport);
   Log.verbose(F("Bflipped = %t"),Bflipped);
+  Log.verbose(F("Bindoor = %t"),Bindoor);
   Log.verbose(F("Display = %d"),display_what);
   Log.verbose(F("Brightness = %d"),display_brightness);
   if (pir_found)
     Log.verbose(F("Motion detector = %d"),pirInput);
+  if (as3935_found)
+    Log.verbose(F("AS3935 int pin = %d"),as3935_input);
 }
 
 void write_config () {
@@ -233,8 +244,12 @@ void write_config () {
   JsonObject location = doc.createNestedObject("location");
   location["site"] = Ssite;
   location["room"] = Sroom;
+  location["indoor"] = Bindoor;
   if (pir_found) {
     doc["motion"] = pirInput;
+  }
+  if (as3935_found) {
+    doc["as3935_input"] = as3935_input;
   }
 
   Log.notice(F("Writing new config file"));
@@ -484,6 +499,11 @@ void mqtt_publish(const __FlashStringHelper *topic, char *msg) {
   mqtt_publish(a,msg);
 }
 
+void mqtt_publish(const __FlashStringHelper *topic, const char *msg) {
+  mqtt_publish(topic, msg);
+}
+
+
 void mqtt_publish(char *topic, int i) {
   char buf[15];
   snprintf(buf,14,"%d",i);
@@ -516,6 +536,7 @@ void mqtt_publish(char *topic, float value) {
 void setup_i2c() {
   byte error, address;
 
+// 0x03 AS3935 Lightning Detector
 // 0x29 TSL45315 (Light)
 // 0x29  Color
 // 0x38 VEML6070 (Light)
@@ -550,6 +571,29 @@ void setup_i2c() {
 
     if (error == 0) {
       Log.trace("I2C device found at address 0x%x",address);
+
+      if (address == AS3935_ADDR) {
+        as3935_found = as3935.begin();
+        Log.notice(F("AS3935 found? %T"),as3935_found);
+        if (as3935_found) {
+          // initialize it
+          // Are we indoor or outdoor?
+          if (Bindoor) {
+            as3935.setIndoorOutdoor(INDOOR);
+          } else {
+            as3935.setIndoorOutdoor(OUTDOOR);
+          }
+          // set default values (tune code later)
+          as3935.maskDisturber(false);
+          as3935.setNoiseLevel(1);
+          as3935.watchdogThreshold(1);
+          as3935.spikeRejection(2);
+          as3935.lightningThreshold(5);
+          as3935.tuneCap(0x0f);
+          as3935.clearStatistics(true);
+          pinMode(as3935_input, INPUT);
+        }
+      }
 
       if (address == 0x29) {
         tcs_found = tcs.begin();
@@ -676,9 +720,12 @@ void setup_readconfig() {
    Smqttserver = root["mqtt"]["server"].as<String>();
    Ssite = root["location"]["site"].as<String>();
    Sroom = root["location"]["room"].as<String>();
+   Bindoor = root["location"]["indoor"];
    Smqttuser = root["mqtt"]["user"].as<String>();
    Smqttpass = root["mqtt"]["pass"].as<String>();
    Imqttport = root["mqtt"]["port"];
+   if (as3935_found)
+    as3935_input = root["as3935_input"];
    if (pirInput = root["motion"]) {
      pir_found = true;
    } else {
@@ -939,7 +986,7 @@ void publish_status() {
   if (pir_found) mqtt_publish(status,F("pir_found"));
 #if defined(ARDUINO_ARCH_ESP8266)
   mqtt_publish(F("status/ChipID"),ESP.getChipId());
-  mqtt_publish(F("status/ResetReason"),ESP.getResetReason());
+  mqtt_publish(F("status/ResetReason"),ESP.getResetReason().c_str());
   mqtt_publish(F("status/SdkVersion"),ESP.getSdkVersion());
   mqtt_publish(F("status/SketchSize"),ESP.getSketchSize());
   mqtt_publish(F("status/CycleCount"),ESP.getCycleCount());
