@@ -114,7 +114,7 @@ PubSubClient client;
 U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
 int pirState = LOW;
 uint8_t pirInput = 12;
-uint8_t as3935_input = 1; // hardware int pin for AS3935
+uint8_t as3935_input = 2; // hardware int pin for AS3935
 
 unsigned transmission_delay = 60; // seconds
 uint32_t led_current_color;
@@ -222,8 +222,7 @@ void log_config () {
   Log.verbose(F("Brightness = %d"),display_brightness);
   if (pir_found)
     Log.verbose(F("Motion detector = %d"),pirInput);
-  if (as3935_found)
-    Log.verbose(F("AS3935 int pin = %d"),as3935_input);
+  Log.verbose(F("AS3935 int pin = %d"),as3935_input);
 }
 
 void write_config () {
@@ -500,7 +499,9 @@ void mqtt_publish(const __FlashStringHelper *topic, char *msg) {
 }
 
 void mqtt_publish(const __FlashStringHelper *topic, const char *msg) {
-  mqtt_publish(topic, msg);
+  char buf[32];
+  snprintf(buf,31,"%s",msg);
+  mqtt_publish(topic, buf);
 }
 
 
@@ -591,7 +592,6 @@ void setup_i2c() {
           as3935.lightningThreshold(5);
           as3935.tuneCap(0x0f);
           as3935.clearStatistics(true);
-          pinMode(as3935_input, INPUT);
         }
       }
 
@@ -668,6 +668,7 @@ void setup_i2c() {
 }
 
 void setup_serial() {
+  delay(1000);
   Serial.begin(115200);
 }
 
@@ -724,8 +725,7 @@ void setup_readconfig() {
    Smqttuser = root["mqtt"]["user"].as<String>();
    Smqttpass = root["mqtt"]["pass"].as<String>();
    Imqttport = root["mqtt"]["port"];
-   if (as3935_found)
-    as3935_input = root["as3935_input"];
+   as3935_input = root["as3935_input"];
    if (pirInput = root["motion"]) {
      pir_found = true;
    } else {
@@ -968,6 +968,40 @@ void setup() {
     setled(2,1,0);
   }
   publish_status();
+  if (as3935_found)
+    pinMode(as3935_input, INPUT);
+}
+
+void publish_as3935() {
+  String value;
+  const __FlashStringHelper *s = F("status/sensors/as3935");
+  if (as3935.readMaskDisturber()) {
+    mqtt_publish(s,F("disturbers masked"));
+  } else {
+    mqtt_publish(s,F("disturbers NOT masked"));
+  }
+  if (as3935.readIndoorOutdoor() == INDOOR) {
+    mqtt_publish(s,F("INDOOR"));
+  } else {
+    mqtt_publish(s,F("OUTDOOR"));
+  }
+  char buf[32];
+
+  snprintf(buf,31,"%s %d",F("Watchdog Threshold"),
+      (int)(as3935.readWatchdogThreshold()));
+  mqtt_publish(s,buf);
+
+  snprintf(buf,31,"%s %d",F("Noise Level"),
+      (int)(as3935.readNoiseLevel()));
+  mqtt_publish(s,buf);
+
+  snprintf(buf,31,"%s %d",F("Spike Rejection"),
+      (int)(as3935.readSpikeRejection()));
+  mqtt_publish(s,buf);
+
+  snprintf(buf,31,"%s %d",F("Lightning numbers threshold"),
+      (int)(as3935.readLightningThreshold()));
+  mqtt_publish(s,buf);
 }
 
 void publish_status() {
@@ -984,8 +1018,12 @@ void publish_status() {
   if (tcs_found) mqtt_publish(status,F("tcs_found"));
   if (ads1115_found) mqtt_publish(status,F("ads1115_found"));
   if (pir_found) mqtt_publish(status,F("pir_found"));
+  if (as3935_found) {
+    mqtt_publish(status, F("as3935_found"));
+    publish_as3935();
+  }
 #if defined(ARDUINO_ARCH_ESP8266)
-  mqtt_publish(F("status/ChipID"),ESP.getChipId());
+  mqtt_publish(F("status/ChipID"),(uint32_t)ESP.getChipId());
   mqtt_publish(F("status/ResetReason"),ESP.getResetReason().c_str());
   mqtt_publish(F("status/SdkVersion"),ESP.getSdkVersion());
   mqtt_publish(F("status/SketchSize"),ESP.getSketchSize());
@@ -1136,6 +1174,52 @@ void loop_pir() {
   }
 }
 
+static int noiseCount=0;
+static int totalDisturberCount=0;
+static int loopcount = 0;
+void loop_as3935() {
+  byte watchDogVal = as3935.readWatchdogThreshold();
+  if (digitalRead(as3935_input) == HIGH) {
+    lightningStatus intReason = (lightningStatus) as3935.readInterruptReg();
+    if (intReason == NOISE_TO_HIGH) {
+      Log.verbose(F("as3935: noise %d"),++noiseCount);
+      byte noiseFloor = as3935.readNoiseLevel();
+      if (noiseCount > 2 && noiseFloor < 7) {
+        as3935.setNoiseLevel(++noiseFloor);
+        Log.verbose(F("as3935: noiseFloor %d"),noiseFloor);
+      }
+    }
+    if (intReason == DISTURBER_DETECT) {
+      Log.verbose(F("as3935: disturber %d"),++totalDisturberCount);
+      if (totalDisturberCount > 2) {
+        if (watchDogVal < 10) {
+          as3935.watchdogThreshold(++watchDogVal);
+          Log.verbose(F("as3935: watchDogVal %d"),watchDogVal);
+        } else {
+          as3935.maskDisturber(true);
+          Log.verbose(F("as3935: Disturbers masked"));
+        }
+      }
+    }
+    if (intReason == LIGHTNING) {
+      byte distance = as3935.distanceToStorm();
+      uint32_t energy = as3935.lightningEnergy();
+      Log.notice(F("as3935: Lightning detected in %d km, energy %u"),distance,energy);
+      mqtt_publish(F("lightning/distance"), distance);
+      mqtt_publish(F("lightning/energy"), energy);
+    }
+  }
+  if (++loopcount > 10000) {
+    loopcount = 0;
+    if (totalDisturberCount > 2 && watchDogVal > 2) {
+      --totalDisturberCount;
+      --watchDogVal;
+      as3935.maskDisturber(false);
+      as3935.watchdogThreshold(watchDogVal);
+      Log.verbose(F("as3935: WatchDogVal %d"),watchDogVal);
+    }
+  }
+}
 
 void loop() {
   // put your main code here, to run repeatedly:
@@ -1155,6 +1239,10 @@ void loop() {
 #if defined(ARDUINO_ARCH_ESP32)
   esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, 10, 10);
 #endif
+
+  if (as3935_found) {
+    loop_as3935();
+  }
 
   // read sensors and publish values
   if (color_watch)
