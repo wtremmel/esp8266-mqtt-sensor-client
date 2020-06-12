@@ -114,7 +114,7 @@ PubSubClient client;
 U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
 int pirState = LOW;
 uint8_t pirInput = 12;
-uint8_t as3935_input = 2; // hardware int pin for AS3935
+uint8_t as3935_input = 13; // D7 hardware int pin for AS3935
 
 unsigned transmission_delay = 60; // seconds
 uint32_t led_current_color;
