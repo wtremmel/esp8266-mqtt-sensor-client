@@ -115,6 +115,8 @@ U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
 int pirState = LOW;
 uint8_t pirInput = 12;
 uint8_t as3935_input = 13; // D7 hardware int pin for AS3935
+uint8_t as3935_tunecap = 0x00;
+
 
 unsigned transmission_delay = 60; // seconds
 uint32_t led_current_color;
@@ -169,6 +171,8 @@ unsigned long last_display = 0;
 boolean setup_wifi();
 void loop_publish_tcs34725();
 void publish_status();
+void publish_as3935();
+
 
 // LED routines
 void setled(byte r, byte g, byte b) {
@@ -223,6 +227,8 @@ void log_config () {
   if (pir_found)
     Log.verbose(F("Motion detector = %d"),pirInput);
   Log.verbose(F("AS3935 int pin = %d"),as3935_input);
+  Log.verbose(F("AS3935 tune cap = %x"),as3935_tunecap);
+
 }
 
 void write_config () {
@@ -249,6 +255,7 @@ void write_config () {
   }
   if (as3935_found) {
     doc["as3935_input"] = as3935_input;
+    doc["as3935_tunecap"] = as3935_tunecap;
   }
 
   Log.notice(F("Writing new config file"));
@@ -338,6 +345,18 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
           if (in[2] == "interrupt") {
             tcs.setInterrupt(in[3] == "on");
 
+          }
+        }
+      }
+      if (as3935_found && in[1] == "as3935") {
+        if (wordcounter == 1) {
+          publish_as3935();
+        }
+        if (wordcounter == 3) {
+          if (in[2] == "tunecap") {
+            as3935.tuneCap((uint8_t) atoi(in[3].c_str()));
+            Log.verbose(F("as3935 tuning capacitor now %d"),
+              as3935.readTuneCap());
           }
         }
       }
@@ -590,7 +609,7 @@ void setup_i2c() {
           as3935.watchdogThreshold(1);
           as3935.spikeRejection(2);
           as3935.lightningThreshold(5);
-          as3935.tuneCap(0x0f);
+          as3935.tuneCap(as3935_tunecap);
           as3935.clearStatistics(true);
         }
       }
@@ -726,6 +745,7 @@ void setup_readconfig() {
    Smqttpass = root["mqtt"]["pass"].as<String>();
    Imqttport = root["mqtt"]["port"];
    as3935_input = root["as3935_input"];
+   as3935_tunecap = root["as3935_tunecap"];
    if (pirInput = root["motion"]) {
      pir_found = true;
    } else {
@@ -1002,6 +1022,12 @@ void publish_as3935() {
   snprintf(buf,31,"%s %d",F("Lightning numbers threshold"),
       (int)(as3935.readLightningThreshold()));
   mqtt_publish(s,buf);
+
+  snprintf(buf,31,"%s %d",F("Tuning capacitor"),
+      (int)(as3935.readTuneCap()));
+  mqtt_publish(s,buf);
+
+
 }
 
 void publish_status() {
