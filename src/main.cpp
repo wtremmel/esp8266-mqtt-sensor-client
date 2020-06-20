@@ -115,7 +115,7 @@ U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
 int pirState = LOW;
 uint8_t pirInput = 12;
 uint8_t as3935_input = 13; // D7 hardware int pin for AS3935
-uint8_t as3935_tunecap = 0x00;
+uint8_t as3935_tunecap = 96;
 
 
 unsigned transmission_delay = 60; // seconds
@@ -227,7 +227,7 @@ void log_config () {
   if (pir_found)
     Log.verbose(F("Motion detector = %d"),pirInput);
   Log.verbose(F("AS3935 int pin = %d"),as3935_input);
-  Log.verbose(F("AS3935 tune cap = %x"),as3935_tunecap);
+  Log.verbose(F("AS3935 tune cap = %d"),as3935_tunecap);
 
 }
 
@@ -253,10 +253,9 @@ void write_config () {
   if (pir_found) {
     doc["motion"] = pirInput;
   }
-  if (as3935_found) {
-    doc["as3935_input"] = as3935_input;
-    doc["as3935_tunecap"] = as3935_tunecap;
-  }
+  doc["as3935_input"] = as3935_input;
+  doc["as3935_tunecap"] = as3935_tunecap;
+
 
   Log.notice(F("Writing new config file"));
   serializeJsonPretty(doc,Serial);
@@ -355,8 +354,10 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
         if (wordcounter == 3) {
           if (in[2] == "tunecap") {
             as3935.tuneCap((uint8_t) atoi(in[3].c_str()));
+            delay(50);
+            as3935_tunecap = as3935.readTuneCap();
             Log.verbose(F("as3935 tuning capacitor now %d"),
-              as3935.readTuneCap());
+              as3935_tunecap);
           }
         }
       }
