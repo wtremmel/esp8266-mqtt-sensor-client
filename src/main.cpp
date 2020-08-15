@@ -1069,10 +1069,13 @@ void loop_publish_tsl2561() {
   if (tsl2561_found) {
     sensors_event_t event;
 
-    if (tsl2561.begin() && tsl2561.getEvent(&event)) {
-      mqtt_publish("light",event.light);
+    if (tsl2561.begin()) {
+      uint16_t br, ir;
+      tsl2561.getLuminosity(&br, &ir);
+      uint32_t lux = tsl2561.calculateLux(br, ir);
+      mqtt_publish("light",lux);
     } else {
-      Log.verbose("loop_publish_tsl2561: Sensor overloaded");
+      Log.verbose("loop_publish_tsl2561: Sensor not initialized");
     }
   }
 }
