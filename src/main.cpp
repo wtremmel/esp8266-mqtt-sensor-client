@@ -89,6 +89,7 @@ static app_gap_cb_t m_dev_info;
 #include "Adafruit_ADS1015.h"
 #include "Adafruit_VL53L0X.h"
 #include "Adafruit_TCS34725.h"
+#include "Adafruit_CCS811.h"
 #include <U8x8lib.h>
 #include <SparkFun_AS3935.h>
 
@@ -102,6 +103,7 @@ uint8_t nrofleds = 1;
 Adafruit_Si7021 si7021;
 Adafruit_BME280 bme280;
 Adafruit_BME680 bme680;
+Adafruit_CCS811 ccs;
 Adafruit_TSL2561_Unified tsl2561 = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT);
 Adafruit_VEML6070 veml = Adafruit_VEML6070();
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
@@ -136,6 +138,7 @@ bool bme280_found = false;
 bool bme680_found = false;
 bool tsl2561_found= false;
 bool voltage_found= true;
+bool ccs811_found = false;
 bool u8x8_found = false;
 bool veml_found = false;
 bool lox_found = false;
@@ -580,6 +583,7 @@ void setup_i2c() {
 // 0x4a GY49 or MAX44009 Light Sensor
 // 0x50 PCF8583P
 // 0x57 ATMEL732
+// 0x5a CCS811 Gas Sensor
 // 0x68 DS3231 Clock
 // 0x76 BME280
 // 0x77 BME680 (also BMP180)
@@ -685,6 +689,15 @@ void setup_i2c() {
         ads1115.begin();
         ads1115_found = true;
         Log.notice(F("ADS1115 found at 0x%x"),address);
+      }
+      if (address == 0x5a) {
+        // CCS811 Gas Sensor
+        if (ccs.begin()){
+          ccs811_found = true;
+          Log.notice(F("CCS811 found at 0x%x"),address);
+          // driver mode 60 seconds is enough
+          ccs.setDriveMode(CCS811_DRIVE_MODE_60SEC);
+        }
       }
       if (address == 0x76 || address == 0x77) {
         // BME280 or BME680
@@ -1131,6 +1144,22 @@ void loop_publish_veml6070() {
   }
 }
 
+void loop_publish_ccs811() {
+  if (ccs811_found) {
+    if (ccs.available()) {
+      if (!ccs.readData()) {
+        mqtt_publish("CO2", ccs.geteCO2());
+        mqtt_publish("TVOC", ccs.getTVOC());
+      } else {
+        Log.verbose(F("Error reading data from CCS811"));
+      }
+    } else {
+      Log.verbose(F("No data available at CCS811"));
+    }
+  }
+}
+
+
 void loop_publish_si7021() {
   if (si7021_found) {
     mqtt_publish("temperature", si7021.readTemperature());
@@ -1318,6 +1347,8 @@ void loop() {
     loop_publish_veml6070();
     client.loop();
     loop_publish_si7021();
+    client.loop();
+    loop_publish_ccs811();
     client.loop();
     last_transmission = millis();
   }
