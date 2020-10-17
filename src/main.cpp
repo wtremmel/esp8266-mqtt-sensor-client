@@ -94,11 +94,11 @@ static app_gap_cb_t m_dev_info;
 
 // Global defines
 #define NEOPIXEL 14 //D5
-#define NROFLEDS 10
 
 #define AS3935_ADDR 0x03
 
 // Global Objects
+uint8_t nrofleds = 1;
 Adafruit_Si7021 si7021;
 Adafruit_BME280 bme280;
 Adafruit_BME680 bme680;
@@ -107,7 +107,7 @@ Adafruit_VEML6070 veml = Adafruit_VEML6070();
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 Adafruit_ADS1115 ads1115;
 SparkFun_AS3935 as3935(AS3935_ADDR);
-Adafruit_NeoPixel led = Adafruit_NeoPixel(NROFLEDS, NEOPIXEL, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel led = Adafruit_NeoPixel(nrofleds, NEOPIXEL, NEO_GRB + NEO_KHZ800);
 Adafruit_TCS34725 tcs = Adafruit_TCS34725();
 WiFiClient espClient;
 PubSubClient client;
@@ -116,6 +116,7 @@ int pirState = LOW;
 uint8_t pirInput = 12;
 uint8_t as3935_input = 13; // D7 hardware int pin for AS3935
 uint8_t as3935_tunecap = 96;
+bool as3935_inconfig = false;
 
 
 unsigned transmission_delay = 60; // seconds
@@ -202,7 +203,7 @@ void setled(byte n, byte r, byte g, byte b, byte show) {
 void setled(byte show) {
   if (!show) {
     int i;
-    for (i = 0; i < NROFLEDS; i++) {
+    for (i = 0; i < nrofleds; i++) {
       setled(i, 0, 0, 0, 0);
     }
   }
@@ -228,6 +229,7 @@ void log_config () {
     Log.verbose(F("Motion detector = %d"),pirInput);
   Log.verbose(F("AS3935 int pin = %d"),as3935_input);
   Log.verbose(F("AS3935 tune cap = %d"),as3935_tunecap);
+  Log.verbose(F("nrofleds = %d"),nrofleds);
 
 }
 
@@ -255,6 +257,7 @@ void write_config () {
   }
   doc["as3935_input"] = as3935_input;
   doc["as3935_tunecap"] = as3935_tunecap;
+  doc["nrofleds"] = nrofleds;
 
 
   Log.notice(F("Writing new config file"));
@@ -317,6 +320,15 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
       setled(in[1].toInt(),in[2].toInt(),in[3].toInt());
     } else if (wordcounter == 4) {
       setled(in[1].toInt(),in[2].toInt(),in[3].toInt(),in[4].toInt());
+    }
+  }
+
+  if (in[0] == "leds") {
+    // apply to all leds
+    if (wordcounter == 3) {
+      int i;
+      for (i=0; i < nrofleds; i++)
+        setled(i,in[1].toInt(),in[2].toInt(),in[3].toInt());
     }
   }
 
@@ -590,6 +602,13 @@ void setup_i2c() {
     Wire.beginTransmission(address);
     error = Wire.endTransmission();
 
+    // force ok for Lightning sensor
+    if (address == AS3935_ADDR && error != 0 && as3935_inconfig) {
+      // force as3935 found
+      Log.trace("AS3935 forced");
+      error = 0;
+    }
+
     if (error == 0) {
       Log.trace("I2C device found at address 0x%x",address);
 
@@ -745,7 +764,13 @@ void setup_readconfig() {
    Smqttuser = root["mqtt"]["user"].as<String>();
    Smqttpass = root["mqtt"]["pass"].as<String>();
    Imqttport = root["mqtt"]["port"];
-   as3935_input = root["as3935_input"];
+   if (as3935_input = root["as3935_input"]) {
+     as3935_inconfig = true;
+   }
+   if (nrofleds = root["nrofleds"]) {
+     led.updateLength(nrofleds);
+   }
+
    as3935_tunecap = root["as3935_tunecap"];
    if (pirInput = root["motion"]) {
      pir_found = true;
@@ -973,6 +998,7 @@ void setup() {
   setup_logging();
   setup_readconfig();
   log_config();
+  pinMode(as3935_input, INPUT);
   setup_i2c();
   if (pir_found)
     setup_pir();

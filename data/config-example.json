@@ -22,5 +22,6 @@
   },
   "motion":12,
   "as3935_input":13,
-  "as3935_tunecap":0x00
+  "as3935_tunecap":0x00,
+  "nrofleds":8 
 }
