@@ -130,6 +130,7 @@ String Smyname, Spass, Sssid, Smqttserver, Ssite, Sroom, Smqttuser, Smqttpass;
 unsigned int Imqttport;
 bool Bflipped;
 bool Bindoor = true;
+bool Bco2alert = false; // CO2-Ampel
 
 
 // Flags for sensors found
@@ -161,6 +162,8 @@ bool color_watch = false;
 #define DISPLAY_STRING 5
 #define DISPLAY_DISTANCE 6
 #define DISPLAY_TEMPHUM 7
+#define DISPLAY_CO2 8
+
 
 unsigned int display_what = DISPLAY_TEMPHUM;
 unsigned int display_brightness = 1;
@@ -233,6 +236,7 @@ void log_config () {
   Log.verbose(F("AS3935 int pin = %d"),as3935_input);
   Log.verbose(F("AS3935 tune cap = %d"),as3935_tunecap);
   Log.verbose(F("nrofleds = %d"),nrofleds);
+  Log.verbose(F("CO2alert = %t"),Bco2alert);
 
 }
 
@@ -261,6 +265,7 @@ void write_config () {
   doc["as3935_input"] = as3935_input;
   doc["as3935_tunecap"] = as3935_tunecap;
   doc["nrofleds"] = nrofleds;
+  doc["co2alert"] = Bco2alert;
 
 
   Log.notice(F("Writing new config file"));
@@ -421,6 +426,8 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
       display_what = DISPLAY_DISTANCE;
     } else if (in[1] == F("temphum")) {
       display_what = DISPLAY_TEMPHUM;
+    } else if (in[1] == F("co2")) {
+      display_what = DISPLAY_CO2;
     } else if (in[1] == "off") {
       u8x8.clearDisplay();
       display_what = DISPLAY_OFF;
@@ -696,7 +703,10 @@ void setup_i2c() {
           ccs811_found = true;
           Log.notice(F("CCS811 found at 0x%x"),address);
           // driver mode 60 seconds is enough
-          ccs.setDriveMode(CCS811_DRIVE_MODE_60SEC);
+          if (Bco2alert)
+            ccs.setDriveMode(CCS811_DRIVE_MODE_1SEC);
+          else
+            ccs.setDriveMode(CCS811_DRIVE_MODE_60SEC);
         }
       }
       if (address == 0x76 || address == 0x77) {
@@ -783,6 +793,7 @@ void setup_readconfig() {
    if (nrofleds = root["nrofleds"]) {
      led.updateLength(nrofleds);
    }
+   Bco2alert = root["co2alert"];
 
    as3935_tunecap = root["as3935_tunecap"];
    if (pirInput = root["motion"]) {
@@ -1083,6 +1094,7 @@ void publish_status() {
   if (lox_found) mqtt_publish(status,F("lox_found"));
   if (tcs_found) mqtt_publish(status,F("tcs_found"));
   if (ads1115_found) mqtt_publish(status,F("ads1115_found"));
+  if (ccs811_found) mqtt_publish(status,F("ccs811_found"));
   if (pir_found) mqtt_publish(status,F("pir_found"));
   if (as3935_found) {
     mqtt_publish(status, F("as3935_found"));
@@ -1144,11 +1156,25 @@ void loop_publish_veml6070() {
   }
 }
 
+int co2ampel(int co2value) {
+  if (Bco2alert) {
+    if (co2value <=1000) {
+      setled(0,255,0);
+    } else if (co2value <= 2000) {
+      setled(255,255,0);
+    } else {
+      setled(255,0,0);
+    }
+
+  }
+  return co2value;
+}
+
 void loop_publish_ccs811() {
   if (ccs811_found) {
     if (ccs.available()) {
       if (!ccs.readData()) {
-        mqtt_publish("CO2", ccs.geteCO2());
+        mqtt_publish("CO2", co2ampel(ccs.geteCO2()));
         mqtt_publish("TVOC", ccs.getTVOC());
       } else {
         Log.verbose(F("Error reading data from CCS811"));
@@ -1406,6 +1432,13 @@ void loop() {
           u8x8.draw2x2String(1, 3, s);
         }
         break;
+      case DISPLAY_CO2:
+          if (ccs811_found && ccs.available()) {
+            snprintf(s, 9, "%dppm", ccs.geteCO2());
+            u8x8.clearDisplay();
+            u8x8.draw2x2String(1, 3, s);
+          }
+          break;
       case DISPLAY_DISTANCE:
         if (lox_found) {
           int dist = loop_get_lox_distance();
