@@ -505,7 +505,6 @@ boolean mqtt_reconnect() {
   return client.connected();
 }
 
-
 unsigned long lastReconnectAttempt = 0;
 void mqtt_publish(char *topic, char *msg) {
   if (!client.connected()) {
@@ -571,6 +570,63 @@ void mqtt_publish(char *topic, float value) {
   mqtt_publish(topic, buf);
 }
 
+void mqtt_influx(char *field, char *value) {
+  char out[128];
+
+  sprintf(out,"sensor,site=%s,room=%s %s=%s",
+    Ssite.c_str(), Sroom.c_str(),field,value);
+  mqtt_publish("influx",out);
+}
+
+void mqtt_influx(char *field, int i) {
+  char buf[15];
+  snprintf(buf,14,"%di",i);
+  mqtt_influx(field,buf);
+}
+
+void mqtt_influx(char *field, float f) {
+  char buf[15];
+  snprintf(buf,14,"%.3f",f);
+  mqtt_influx(field,buf);
+}
+
+void mqtt_influx(char *field, uint32_t i) {
+  char buf[32];
+  snprintf(buf,31,"%lu",i);
+  mqtt_influx(field,buf);
+}
+
+void mqtt_influx(char *field, bool b) {
+  if (b)
+    mqtt_influx(field,"true");
+  else
+    mqtt_influx(field,"false");
+}
+
+void mqtt_influx(const __FlashStringHelper *topic, const __FlashStringHelper *msg) {
+  char a[32],b[32];
+  snprintf(a,31,"%s",topic);
+  snprintf(b,31,"%s",msg);
+  mqtt_influx(a,b);
+}
+
+void mqtt_influx(const __FlashStringHelper *topic, char *msg) {
+  char a[32];
+  snprintf(a,31,"%s",topic);
+  mqtt_influx(a,msg);
+}
+
+void mqtt_influx(const __FlashStringHelper *topic, const char *msg) {
+  char buf[32];
+  snprintf(buf,31,"%s",msg);
+  mqtt_influx(topic, buf);
+}
+
+void mqtt_influx(const __FlashStringHelper *topic, uint32_t i) {
+  char buf[32];
+  snprintf(buf,31,"%lu",i);
+  mqtt_influx(topic,buf);
+}
 
 // Setup routines
 //
@@ -807,6 +863,11 @@ void setup_readconfig() {
 }
 
 boolean setup_wifi() {
+#if LWIP_IPV6
+  Log.notice(F("IPV6 is enabled"));
+#else
+  Log.notice(F("IPV6 is not enabled"));
+#endif
   WiFi.persistent(false);
   WiFi.disconnect();
   delay(100);
@@ -1113,6 +1174,7 @@ void publish_status() {
 void loop_publish_voltage(){
 #if defined(ARDUINO_ARCH_ESP8266)
   mqtt_publish("voltage", (float)(ESP.getVcc() / 1000.0));
+  mqtt_influx("voltage", (float)(ESP.getVcc() / 1000.0));
 #endif
 }
 
@@ -1125,6 +1187,7 @@ void loop_publish_tsl2561() {
       tsl2561.getLuminosity(&br, &ir);
       uint32_t lux = tsl2561.calculateLux(br, ir);
       mqtt_publish("light",lux);
+      mqtt_influx("light",lux);
     } else {
       Log.verbose("loop_publish_tsl2561: Sensor not initialized");
     }
@@ -1136,6 +1199,9 @@ void loop_publish_bme280() {
     mqtt_publish("temperature", bme280.readTemperature());
     mqtt_publish("airpressure", bme280.readPressure() / 100.0F);
     mqtt_publish("humidity", bme280.readHumidity());
+    mqtt_influx("temperature", bme280.readTemperature());
+    mqtt_influx("airpressure", bme280.readPressure() / 100.0F);
+    mqtt_influx("humidity", bme280.readHumidity());
   }
 }
 
@@ -1145,6 +1211,12 @@ void loop_publish_bme680() {
     mqtt_publish("airpressure", bme680.pressure / 100.0F);
     mqtt_publish("humidity", bme680.humidity);
     mqtt_publish("airquality", bme680.gas_resistance / 1000.0F);
+
+    mqtt_influx("temperature", bme680.temperature);
+    mqtt_influx("airpressure", bme680.pressure / 100.0F);
+    mqtt_influx("humidity", bme680.humidity);
+    mqtt_influx("airquality", bme680.gas_resistance / 1000.0F);
+
   }
 }
 
@@ -1153,6 +1225,7 @@ void loop_publish_bme680() {
 void loop_publish_veml6070() {
   if (veml_found) {
     mqtt_publish("UV", veml.readUV());
+    mqtt_influx("UV", veml.readUV());
   }
 }
 
@@ -1176,6 +1249,8 @@ void loop_publish_ccs811() {
       if (!ccs.readData()) {
         mqtt_publish("CO2", co2ampel(ccs.geteCO2()));
         mqtt_publish("TVOC", ccs.getTVOC());
+        mqtt_influx("CO2",co2ampel(ccs.geteCO2()));
+        mqtt_influx("TVOC",ccs.getTVOC());
       } else {
         Log.verbose(F("Error reading data from CCS811"));
       }
@@ -1190,6 +1265,8 @@ void loop_publish_si7021() {
   if (si7021_found) {
     mqtt_publish("temperature", si7021.readTemperature());
     mqtt_publish("humidity", si7021.readHumidity());
+    mqtt_influx("temperature", si7021.readTemperature());
+    mqtt_influx("humidity", si7021.readHumidity());
   }
 }
 
@@ -1272,7 +1349,8 @@ void loop_pir() {
       return;
     // Low -> High
     if (pir_old == LOW && pirState == HIGH) {
-      mqtt_publish("motion", "started");
+      mqtt_publish("motion", 1);
+      mqtt_influx("motion", true);
     }
 
     // High -> High
@@ -1280,7 +1358,8 @@ void loop_pir() {
       return;
     // High -> Low
     if (pir_old == HIGH && pirState == LOW) {
-      mqtt_publish("motion", "stopped");
+      mqtt_publish("motion", 0);
+      mqtt_influx("motion", false);
     }
   }
 }
@@ -1318,6 +1397,9 @@ void loop_as3935() {
       Log.notice(F("as3935: Lightning detected in %d km, energy %u"),distance,energy);
       mqtt_publish(F("lightning/distance"), distance);
       mqtt_publish(F("lightning/energy"), energy);
+      mqtt_influx(F("lightning/distance"), distance);
+      mqtt_influx(F("lightning/energy"), energy);
+
     }
   }
   if (++loopcount > 10000) {
