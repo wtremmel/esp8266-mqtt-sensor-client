@@ -27,6 +27,7 @@
 
 #if defined(ARDUINO_ARCH_ESP8266)
 #include <ESP8266WiFi.h>
+#include <AddrList.h>
 #include <FS.h>
 #define I2CSDA 4  //D2 gruen
 #define I2CSCL 5  //D1 gelb
@@ -863,11 +864,6 @@ void setup_readconfig() {
 }
 
 boolean setup_wifi() {
-#if LWIP_IPV6
-  Log.notice(F("IPV6 is enabled"));
-#else
-  Log.notice(F("IPV6 is not enabled"));
-#endif
   WiFi.persistent(false);
   WiFi.disconnect();
   delay(100);
@@ -890,6 +886,25 @@ boolean setup_wifi() {
   String myIP = String(WiFi.localIP().toString());
   String myMask = String(WiFi.subnetMask().toString());
   Log.verbose("Wifi connected as %s/%s",myIP.c_str(),myMask.c_str());
+
+  #if LWIP_IPV6
+  String linkLocal, ipv6, ipv4;
+  for (bool configured = false; !configured;) {
+    for (auto addr : addrList)
+      if (configured = addr.isV6() && !addr.isLocal()) {
+        break;
+      }
+      delay(500);
+  }
+  for (auto a : addrList) {
+    a.isV6() ? a.isLocal() ? linkLocal = a.toString() : ipv6 = a.toString() : ipv4 = a.toString();
+  }
+  Log.notice(F("IPv4 address: %s"), ipv4.c_str());
+  Log.notice(F("IPv6 local: %s"), linkLocal.c_str());
+  Log.notice(F("IPv6 global: %s"), ipv6.c_str());
+  #else
+    Log.notice(F("IPV6 is not enabled"));
+  #endif
   return true;
 }
 
