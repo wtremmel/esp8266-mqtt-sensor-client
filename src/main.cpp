@@ -125,7 +125,6 @@ bool as3935_inconfig = false;
 unsigned transmission_delay = 60; // seconds
 uint32_t led_current_color;
 
-
 // Strings for dynamic config
 String Smyname, Spass, Sssid, Smqttserver, Ssite, Sroom, Smqttuser, Smqttpass;
 unsigned int Imqttport;
@@ -154,6 +153,9 @@ bool as3935_found = false;
 
 bool color_watch = false;
 
+// Floats for calibration
+float bme280TempAdjust = 0.0;
+
 // Flags for display
 #define DISPLAY_OFF 0
 #define DISPLAY_TEMPERATURE 1
@@ -180,6 +182,7 @@ boolean setup_wifi();
 void loop_publish_tcs34725();
 void publish_status();
 void publish_as3935();
+void publish_bme280();
 
 
 // LED routines
@@ -260,6 +263,11 @@ void write_config () {
   location["site"] = Ssite;
   location["room"] = Sroom;
   location["indoor"] = Bindoor;
+
+  JsonObject sensors = doc.createNestedObject("sensors");
+  JsonObject bme280 = sensors.createNestedObject("bme280");
+  bme280["tempadjust"] = bme280TempAdjust;
+
   if (pir_found) {
     doc["motion"] = pirInput;
   }
@@ -380,6 +388,15 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
             Log.verbose(F("as3935 tuning capacitor now %d"),
               as3935_tunecap);
           }
+        }
+      }
+      if (bme280_found && in[1] == "bme280") {
+        if (wordcounter == 1) {
+          publish_bme280();
+        }
+        if (wordcounter == 3 && in[2] == "tempadjust") {
+          bme280.setTemperatureCompensation(atof(in[3].c_str()));
+          publish_bme280();
         }
       }
     }
@@ -570,6 +587,14 @@ void mqtt_publish(char *topic, float value) {
   snprintf(buf,14,"%.3f",value);
   mqtt_publish(topic, buf);
 }
+
+void mqtt_publish(const __FlashStringHelper *topic, float value) {
+  char buf[15];
+  snprintf(buf,14,"%.3f",value);
+  mqtt_publish(topic, buf);
+}
+
+
 
 void mqtt_influx(char *field, char *value) {
   char out[128];
@@ -779,6 +804,8 @@ void setup_i2c() {
         } else {
           bme280_found = bme280.begin(address);
           Log.notice("BME280 found? %T at 0x%x",bme280_found,address);
+          bme280.setTemperatureCompensation(bme280TempAdjust);
+          Log.notice("BME280 adjustment %f",bme280TempAdjust);
         }
       }
     }
@@ -844,6 +871,9 @@ void setup_readconfig() {
    Smqttuser = root["mqtt"]["user"].as<String>();
    Smqttpass = root["mqtt"]["pass"].as<String>();
    Imqttport = root["mqtt"]["port"];
+
+   bme280TempAdjust = root["sensors"]["bme280"]["tempadjust"];
+
    if (as3935_input = root["as3935_input"]) {
      as3935_inconfig = true;
    }
@@ -888,7 +918,6 @@ boolean setup_wifi() {
   Log.verbose("Wifi connected as %s/%s",myIP.c_str(),myMask.c_str());
 
   #if LWIP_IPV6
-  String linkLocal, ipv6, ipv4;
   for (bool configured = false; !configured;) {
     for (auto addr : addrList)
       if (configured = addr.isV6() && !addr.isLocal()) {
@@ -896,14 +925,6 @@ boolean setup_wifi() {
       }
       delay(500);
   }
-  for (auto a : addrList) {
-    a.isV6() ? a.isLocal() ? linkLocal = a.toString() : ipv6 = a.toString() : ipv4 = a.toString();
-  }
-  Log.notice(F("IPv4 address: %s"), ipv4.c_str());
-  Log.notice(F("IPv6 local: %s"), linkLocal.c_str());
-  Log.notice(F("IPv6 global: %s"), ipv6.c_str());
-  #else
-    Log.notice(F("IPV6 is not enabled"));
   #endif
   return true;
 }
@@ -1158,7 +1179,10 @@ void publish_as3935() {
 }
 
 void publish_status() {
-  const __FlashStringHelper *status = F("status/sensors");
+  const __FlashStringHelper *status = F("status/sensors"),
+   *net = F("status/network");
+  String ipv4, ipv6, linkLocal;
+
 
   if (si7021_found) mqtt_publish(status,F("si7021_found"));
   if (bme280_found) mqtt_publish(status,F("bme280_found"));
@@ -1184,6 +1208,17 @@ void publish_status() {
   mqtt_publish(F("status/CycleCount"),ESP.getCycleCount());
 #endif
 
+#if LWIP_IPV6
+for (auto a : addrList) {
+  a.isV6() ? a.isLocal() ? linkLocal = a.toString() : ipv6 = a.toString() : ipv4 = a.toString();
+}
+
+mqtt_publish(F("status/ipv4"), ipv4.c_str());
+mqtt_publish(F("status/ipv6ll"), linkLocal.c_str());
+mqtt_publish(F("status/ipv6"), ipv6.c_str());
+#else
+  mqtt_publish(F("status/ipv6"),F("disabled"));
+#endif
 }
 
 void loop_publish_voltage(){
@@ -1206,6 +1241,13 @@ void loop_publish_tsl2561() {
     } else {
       Log.verbose("loop_publish_tsl2561: Sensor not initialized");
     }
+  }
+}
+
+void publish_bme280() {
+  if (bme280_found) {
+    mqtt_publish(F("bme280/tempadjust"),
+      (float)bme280.getTemperatureCompensation());
   }
 }
 
@@ -1410,7 +1452,7 @@ void loop_as3935() {
       byte distance = as3935.distanceToStorm();
       uint32_t energy = as3935.lightningEnergy();
       Log.notice(F("as3935: Lightning detected in %d km, energy %u"),distance,energy);
-      mqtt_publish(F("lightning/distance"), distance);
+      mqtt_publish(F("lightning/distance"), (uint32_t)distance);
       mqtt_publish(F("lightning/energy"), energy);
       mqtt_influx(F("lightning/distance"), distance);
       mqtt_influx(F("lightning/energy"), energy);
