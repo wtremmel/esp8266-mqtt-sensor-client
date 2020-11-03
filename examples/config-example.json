@@ -23,6 +23,9 @@
   "sensors":{
     "bme280":{
       "tempadjust":-5.2
+    },
+    "si7021":{
+      "tempadjust":-2
     }
   },
   "motion":12,
