@@ -20,8 +20,14 @@
     "brightness":1,
     "content":7
   },
+  "sensors":{
+    "bme280":{
+      "tempadjust":-5.2
+    }
+  },
   "motion":12,
   "as3935_input":13,
   "as3935_tunecap":0x00,
-  "nrofleds":8 
+  "nrofleds":8,
+  "co2alert":true
 }
