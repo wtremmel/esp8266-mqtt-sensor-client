@@ -155,6 +155,7 @@ bool color_watch = false;
 
 // Floats for calibration
 float bme280TempAdjust = 0.0;
+float si7021TempAdjust = 0.0;
 
 // Flags for display
 #define DISPLAY_OFF 0
@@ -183,6 +184,7 @@ void loop_publish_tcs34725();
 void publish_status();
 void publish_as3935();
 void publish_bme280();
+void publish_si7021();
 
 
 // LED routines
@@ -268,8 +270,13 @@ void write_config () {
   JsonObject bme280 = sensors.createNestedObject("bme280");
   bme280["tempadjust"] = bme280TempAdjust;
 
+  JsonObject si7021 = sensors.createNestedObject("si7021");
+  si7021["tempadjust"] = si7021TempAdjust;
+
+  JsonObject pir;
   if (pir_found) {
-    doc["motion"] = pirInput;
+    pir = sensors.createNestedObject("pir");
+    pir["pin"] = pirInput;
   }
   doc["as3935_input"] = as3935_input;
   doc["as3935_tunecap"] = as3935_tunecap;
@@ -399,6 +406,15 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
           publish_bme280();
         }
       }
+      if (si7021_found && in[1] == "si7021") {
+        if (wordcounter == 1) {
+          publish_si7021();
+        }
+        if (wordcounter == 3 && in[2] == "tempadjust") {
+          si7021TempAdjust = atof(in[3].c_str());
+          publish_si7021();
+        }
+      }
     }
   }
 
@@ -431,7 +447,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
     }
   }
 
-  if (in[0] == "display" && wordcounter >= 1) {
+  if (u8x8_found && (in[0] == "display") && (wordcounter >= 1)) {
     last_display = 0;
     display_refresh = true;
     if (in[1] == "humidity") {
@@ -845,7 +861,7 @@ void setup_readconfig() {
     Log.error("Cannot open config file");
     return;
   }
-  StaticJsonDocument<512> jsonBuffer;
+  StaticJsonDocument<1024> jsonBuffer;
 
  // Parse the root object
  // JsonObject root = jsonBuffer.parseObject(f);
@@ -853,6 +869,8 @@ void setup_readconfig() {
  auto error = deserializeJson(jsonBuffer,f);
  if (error) {
    Log.error(F("Failed to read file %s"),error.c_str());
+ } else {
+   serializeJsonPretty(jsonBuffer,Serial);
  }
 
  JsonObject root = jsonBuffer.as<JsonObject>();
@@ -873,6 +891,7 @@ void setup_readconfig() {
    Imqttport = root["mqtt"]["port"];
 
    bme280TempAdjust = root["sensors"]["bme280"]["tempadjust"];
+   si7021TempAdjust = root["sensors"]["si7021"]["tempadjust"];
 
    if (as3935_input = root["as3935_input"]) {
      as3935_inconfig = true;
@@ -883,7 +902,7 @@ void setup_readconfig() {
    Bco2alert = root["co2alert"];
 
    as3935_tunecap = root["as3935_tunecap"];
-   if (pirInput = root["motion"]) {
+   if (pirInput = root["sensors"]["pir"]["pin"]) {
      pir_found = true;
    } else {
      pir_found = false;
@@ -1251,6 +1270,13 @@ void publish_bme280() {
   }
 }
 
+void publish_si7021() {
+  if (si7021_found) {
+    mqtt_publish(F("si7021/tempadjust"),
+      (float)si7021TempAdjust);
+  }
+}
+
 void loop_publish_bme280() {
   if (bme280_found) {
     mqtt_publish("temperature", bme280.readTemperature());
@@ -1320,9 +1346,9 @@ void loop_publish_ccs811() {
 
 void loop_publish_si7021() {
   if (si7021_found) {
-    mqtt_publish("temperature", si7021.readTemperature());
+    mqtt_publish("temperature", si7021.readTemperature() + si7021TempAdjust);
     mqtt_publish("humidity", si7021.readHumidity());
-    mqtt_influx("temperature", si7021.readTemperature());
+    mqtt_influx("temperature", si7021.readTemperature() + si7021TempAdjust);
     mqtt_influx("humidity", si7021.readHumidity());
   }
 }
@@ -1354,11 +1380,29 @@ void loop_publish_tcs34725() {
   }
 }
 
+static unsigned long lastReportTime = 0;
+static bool lastReportState = false;
+
+void loop_publish_motion(bool m) {
+  // report motion (true or false)
+  // remember when last report was and report only once a minute
+
+
+//  if (lastReportTime + 60l*1000l > millis())
+//    return;
+
+  lastReportTime = millis();
+  lastReportState = m;
+  mqtt_influx("motion", m);
+  mqtt_publish("motion", (int) m);
+}
+
 int loop_get_lox_distance() {
   if (lox_found) {
     VL53L0X_RangingMeasurementData_t measure;
     lox.rangingTest(&measure);
     if (measure.RangeStatus != 4) {
+      // mqtt_influx(F("distance"), measure.RangeMilliMeter);
       return measure.RangeMilliMeter;
     }
   }
@@ -1367,6 +1411,9 @@ int loop_get_lox_distance() {
 
 void lights_on(int dist) {
   bool x = false;
+
+  if (dist == 1406)
+    return;
 
  if ((dist > 0) && (dist < 500))
     x = true;
@@ -1381,10 +1428,12 @@ void lights_on(int dist) {
   if (x) {
     led.setPixelColor(0, led_current_color);
     led.show();
+    loop_publish_motion(true);
   } else {
     led_current_color = led.getPixelColor(0);
     led.clear();
     led.show();
+    loop_publish_motion(false);
   }
 
   if (u8x8_found) {
@@ -1406,8 +1455,7 @@ void loop_pir() {
       return;
     // Low -> High
     if (pir_old == LOW && pirState == HIGH) {
-      mqtt_publish("motion", 1);
-      mqtt_influx("motion", true);
+      loop_publish_motion(true);
     }
 
     // High -> High
@@ -1415,8 +1463,7 @@ void loop_pir() {
       return;
     // High -> Low
     if (pir_old == HIGH && pirState == LOW) {
-      mqtt_publish("motion", 0);
-      mqtt_influx("motion", false);
+      loop_publish_motion(false);
     }
   }
 }
