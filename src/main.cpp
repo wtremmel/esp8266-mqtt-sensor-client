@@ -403,6 +403,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
         }
         if (wordcounter == 3 && in[2] == "tempadjust") {
           bme280.setTemperatureCompensation(atof(in[3].c_str()));
+          bme280TempAdjust = bme280.getTemperatureCompensation();
           publish_bme280();
         }
       }
