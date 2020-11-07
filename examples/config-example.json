@@ -24,6 +24,9 @@
     "bme280":{
       "tempadjust":-5.2
     },
+    "bme680":{
+      "tempadjust":-1.5
+    },
     "si7021":{
       "tempadjust":-2
     },

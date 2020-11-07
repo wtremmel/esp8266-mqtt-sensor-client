@@ -22,6 +22,8 @@
 // #define ESP31 // Test
 // #define ESP30 // DingDong
 
+const char compile_date[] = __DATE__ " " __TIME__;
+
 #include <Arduino.h>
 #include <ArduinoLog.h>
 
@@ -78,12 +80,17 @@ static app_gap_cb_t m_dev_info;
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
+// #define BME680Bosch true
 
 // Sensor Libraries
 #include <Wire.h>
 #include "Adafruit_Si7021.h"
 #include "Adafruit_BME280.h"
+#if defined(BME680Bosch)
+#include "bsec.h"
+#else
 #include "Adafruit_BME680.h"
+#endif
 #include "Adafruit_TSL2561_U.h"
 #include <Adafruit_NeoPixel.h>
 #include "Adafruit_VEML6070.h"
@@ -103,7 +110,12 @@ static app_gap_cb_t m_dev_info;
 uint8_t nrofleds = 1;
 Adafruit_Si7021 si7021;
 Adafruit_BME280 bme280;
+#if defined(BME680Bosch)
+Bsec iaqSensor;
+void checkIaqSensorStatus(void);
+#else
 Adafruit_BME680 bme680;
+#endif
 Adafruit_CCS811 ccs;
 Adafruit_TSL2561_Unified tsl2561 = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT);
 Adafruit_VEML6070 veml = Adafruit_VEML6070();
@@ -155,6 +167,7 @@ bool color_watch = false;
 
 // Floats for calibration
 float bme280TempAdjust = 0.0;
+float bme680TempAdjust = 0.0;
 float si7021TempAdjust = 0.0;
 
 // Flags for display
@@ -184,6 +197,7 @@ void loop_publish_tcs34725();
 void publish_status();
 void publish_as3935();
 void publish_bme280();
+void publish_bme680();
 void publish_si7021();
 
 
@@ -267,14 +281,24 @@ void write_config () {
   location["indoor"] = Bindoor;
 
   JsonObject sensors = doc.createNestedObject("sensors");
-  JsonObject bme280 = sensors.createNestedObject("bme280");
-  bme280["tempadjust"] = bme280TempAdjust;
 
-  JsonObject si7021 = sensors.createNestedObject("si7021");
-  si7021["tempadjust"] = si7021TempAdjust;
+  if (bme280_found) {
+    JsonObject bme280 = sensors.createNestedObject("bme280");
+    bme280["tempadjust"] = bme280TempAdjust;
+  }
 
-  JsonObject pir;
+  if (bme680_found) {
+    JsonObject bme680 = sensors.createNestedObject("bme680");
+    bme680["tempadjust"] = bme680TempAdjust;
+  }
+
+  if (si7021_found) {
+    JsonObject si7021 = sensors.createNestedObject("si7021");
+    si7021["tempadjust"] = si7021TempAdjust;
+  }
+
   if (pir_found) {
+    JsonObject pir;
     pir = sensors.createNestedObject("pir");
     pir["pin"] = pirInput;
   }
@@ -407,6 +431,21 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
           publish_bme280();
         }
       }
+
+      if (bme680_found && in[1] == "bme680") {
+        if (wordcounter == 1) {
+          publish_bme680();
+        }
+        if (wordcounter == 3 && in[2] == "tempadjust") {
+          bme680TempAdjust = atof(in[3].c_str());
+          #if defined (BME680Bosch)
+          iaqSensor.setTemperatureOffset(-1.0 * bme680TempAdjust);
+          #endif
+          publish_bme680();
+        }
+      }
+
+
       if (si7021_found && in[1] == "si7021") {
         if (wordcounter == 1) {
           publish_si7021();
@@ -671,6 +710,13 @@ void mqtt_influx(const __FlashStringHelper *topic, uint32_t i) {
   mqtt_influx(topic,buf);
 }
 
+void mqtt_influx(const __FlashStringHelper *topic, float f) {
+  char buf[32];
+  snprintf(buf,31,"%.3f",f);
+  mqtt_influx(topic,buf);
+}
+
+
 // Setup routines
 //
 // Scan for sensors
@@ -810,6 +856,28 @@ void setup_i2c() {
       }
       if (address == 0x76 || address == 0x77) {
         // BME280 or BME680
+        #if defined(BME680Bosch)
+        iaqSensor.begin(address,Wire);
+        checkIaqSensorStatus();
+        if (bme680_found) {
+          Log.notice("BME680 found using Bosch? %T at 0x%x",bme680_found,address);
+          bsec_virtual_sensor_t sensorList[12] = {
+            BSEC_OUTPUT_IAQ,
+            BSEC_OUTPUT_CO2_EQUIVALENT,
+            BSEC_OUTPUT_STABILIZATION_STATUS,
+            BSEC_OUTPUT_RUN_IN_STATUS,
+            BSEC_OUTPUT_RAW_TEMPERATURE,
+            BSEC_OUTPUT_RAW_PRESSURE,
+            BSEC_OUTPUT_RAW_HUMIDITY,
+            BSEC_OUTPUT_RAW_GAS,
+            BSEC_OUTPUT_COMPENSATED_GAS,
+            BSEC_OUTPUT_GAS_PERCENTAGE,
+            BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE,
+            BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY
+          };
+          iaqSensor.updateSubscription(sensorList, 12, BSEC_SAMPLE_RATE_LP);
+          iaqSensor.setTemperatureOffset(-1.0 * bme680TempAdjust);
+        #else // Adafruit
         bme680_found = bme680.begin(address);
         if (bme680_found) {
           bme680.setTemperatureOversampling(BME680_OS_8X);
@@ -817,12 +885,13 @@ void setup_i2c() {
           bme680.setPressureOversampling(BME680_OS_4X);
           bme680.setIIRFilterSize(BME680_FILTER_SIZE_3);
           bme680.setGasHeater(320, 150); // 320*C for 150 ms
-          Log.notice("BME680 found? %T at 0x%x",bme680_found,address);
+          Log.notice("BME680 found using Adafruit? %T at 0x%x",bme680_found,address);
+        #endif
         } else {
           bme280_found = bme280.begin(address);
           Log.notice("BME280 found? %T at 0x%x",bme280_found,address);
           bme280.setTemperatureCompensation(bme280TempAdjust);
-          Log.notice("BME280 adjustment %f",bme280TempAdjust);
+          Log.notice("BME280 adjustment %F",bme280TempAdjust);
         }
       }
     }
@@ -892,6 +961,7 @@ void setup_readconfig() {
    Imqttport = root["mqtt"]["port"];
 
    bme280TempAdjust = root["sensors"]["bme280"]["tempadjust"];
+   bme680TempAdjust = root["sensors"]["bme680"]["tempadjust"];
    si7021TempAdjust = root["sensors"]["si7021"]["tempadjust"];
 
    if (as3935_input = root["as3935_input"]) {
@@ -1227,6 +1297,7 @@ void publish_status() {
   mqtt_publish(F("status/SketchSize"),ESP.getSketchSize());
   mqtt_publish(F("status/CycleCount"),ESP.getCycleCount());
 #endif
+  mqtt_publish(F("status/CompileTime"), compile_date);
 
 #if LWIP_IPV6
 for (auto a : addrList) {
@@ -1271,6 +1342,13 @@ void publish_bme280() {
   }
 }
 
+void publish_bme680() {
+  if (bme680_found) {
+    mqtt_publish(F("bme680/tempadjust"),
+      (float)bme680TempAdjust);
+  }
+}
+
 void publish_si7021() {
   if (si7021_found) {
     mqtt_publish(F("si7021/tempadjust"),
@@ -1289,21 +1367,91 @@ void loop_publish_bme280() {
   }
 }
 
+#if defined(BME680Bosch)
+void checkIaqSensorStatus(void) {
+  bme680_found = true;
+  if (iaqSensor.status != BSEC_OK) {
+    if (iaqSensor.status < BSEC_OK) {
+      Log.error(F("BSEC error code %d"), iaqSensor.status);
+      bme680_found = false;
+    } else {
+      Log.warning(F("BSEC warning code %d"), iaqSensor.status);
+    }
+  }
+
+  if (iaqSensor.status != BME680_OK) {
+    if (iaqSensor.status < BME680_OK) {
+      Log.error(F("BME680 error code %d"), iaqSensor.bme680Status);
+      bme680_found = false;
+    } else {
+      Log.warning(F("BME680 warning code %d"), iaqSensor.bme680Status);
+    }
+  }
+
+}
+
+void loop_publish_bme680() {
+  if (bme680_found) {
+    if (iaqSensor.run()) {
+      mqtt_publish(F("temperature"), (float)iaqSensor.temperature);
+      mqtt_influx(F("temperature"), (float)iaqSensor.temperature);
+      mqtt_publish(F("humidity"), (float)iaqSensor.humidity);
+      mqtt_influx(F("humidity"), (float)iaqSensor.humidity);
+      mqtt_publish(F("airpressure"), iaqSensor.pressure / 100.0F);
+      mqtt_influx(F("airpressure"), iaqSensor.pressure / 100.0F);
+      if (iaqSensor.runInStatus == 1 &&
+          iaqSensor.stabStatus == 1) {
+        mqtt_publish(F("CO2"), iaqSensor.co2Equivalent);
+        mqtt_influx(F("CO2"), iaqSensor.co2Equivalent);
+        mqtt_publish(F("airquality"), iaqSensor.iaq);
+        mqtt_influx(F("airquality"), iaqSensor.iaq);
+      }  else {
+        Log.notice(F("bme60 runIn = %F stab = %F"),
+                  iaqSensor.runInStatus,
+                  iaqSensor.stabStatus);
+        Log.verbose(F("  gasResistance=%F compGasValue=%F gasPercentage=%F compGasAccuracy=%d gasPercentageAcccuracy=%d"),
+          iaqSensor.gasResistance,
+          iaqSensor.compGasValue,
+          iaqSensor.gasPercentage,
+          iaqSensor.compGasAccuracy,
+          iaqSensor.gasPercentageAcccuracy);
+        Log.verbose(F("  rawtemp=%F rawHum=%F"),
+          iaqSensor.rawTemperature,
+          iaqSensor.rawHumidity
+        );
+        Log.verbose(F("  temp=%F hum=%F press=%F co2=%F iaq=%F"),
+          iaqSensor.temperature,
+          iaqSensor.humidity,
+          iaqSensor.pressure / 100.0F,
+          iaqSensor.co2Equivalent,
+          iaqSensor.iaq);
+        Log.verbose(F("  co2Ac=%d iaqAc=%d"),
+          iaqSensor.co2Accuracy,iaqSensor.iaqAccuracy
+        );
+      }
+    } else {
+      checkIaqSensorStatus();
+    }
+  }
+
+
+}
+#else // Adafruit
 void loop_publish_bme680() {
   if (bme680_found && bme680.performReading()) {
-    mqtt_publish("temperature", bme680.temperature);
+    mqtt_publish("temperature", (float) (bme680.temperature + bme680TempAdjust));
     mqtt_publish("airpressure", bme680.pressure / 100.0F);
-    mqtt_publish("humidity", bme680.humidity);
+    mqtt_publish("humidity", (float)bme680.humidity);
     mqtt_publish("airquality", bme680.gas_resistance / 1000.0F);
 
-    mqtt_influx("temperature", bme680.temperature);
+    mqtt_influx("temperature", (float)bme680.temperature);
     mqtt_influx("airpressure", bme680.pressure / 100.0F);
-    mqtt_influx("humidity", bme680.humidity);
+    mqtt_influx("humidity", (float)bme680.humidity);
     mqtt_influx("airquality", bme680.gas_resistance / 1000.0F);
 
   }
 }
-
+#endif
 
 
 void loop_publish_veml6070() {
@@ -1502,7 +1650,7 @@ void loop_as3935() {
       Log.notice(F("as3935: Lightning detected in %d km, energy %u"),distance,energy);
       mqtt_publish(F("lightning/distance"), (uint32_t)distance);
       mqtt_publish(F("lightning/energy"), energy);
-      mqtt_influx(F("lightning/distance"), distance);
+      mqtt_influx(F("lightning/distance"), (uint32_t)distance);
       mqtt_influx(F("lightning/energy"), energy);
 
     }
