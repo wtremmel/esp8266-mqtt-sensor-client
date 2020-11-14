@@ -27,6 +27,12 @@ const char compile_date[] = __DATE__ " " __TIME__;
 #include <Arduino.h>
 #include <ArduinoLog.h>
 
+#define LWIP_DEBUG 1
+#include <lwip/debug.h>
+#define UDP_DEBUG LWIP_DBG_ON
+#include <lwip-git-hash.h>
+
+
 #if defined(ARDUINO_ARCH_ESP8266)
 #include <ESP8266WiFi.h>
 #include <AddrList.h>
@@ -88,6 +94,10 @@ static app_gap_cb_t m_dev_info;
 #include "Adafruit_BME280.h"
 #if defined(BME680Bosch)
 #include "bsec.h"
+const uint8_t bsec_config_iaq[] = {
+#include "config/generic_33v_3s_28d/bsec_iaq.txt"
+};
+
 #else
 #include "Adafruit_BME680.h"
 #endif
@@ -100,6 +110,7 @@ static app_gap_cb_t m_dev_info;
 #include "Adafruit_CCS811.h"
 #include <U8x8lib.h>
 #include <SparkFun_AS3935.h>
+#include <Max44009.h>
 
 // Global defines
 #define NEOPIXEL 14 //D5
@@ -108,6 +119,9 @@ static app_gap_cb_t m_dev_info;
 
 // Global Objects
 uint8_t nrofleds = 1;
+neoPixelType ledtype = NEO_GRB + NEO_KHZ800;
+bool has_white = false;
+
 Adafruit_Si7021 si7021;
 Adafruit_BME280 bme280;
 #if defined(BME680Bosch)
@@ -122,8 +136,9 @@ Adafruit_VEML6070 veml = Adafruit_VEML6070();
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 Adafruit_ADS1115 ads1115;
 SparkFun_AS3935 as3935(AS3935_ADDR);
-Adafruit_NeoPixel led = Adafruit_NeoPixel(nrofleds, NEOPIXEL, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel led = Adafruit_NeoPixel(nrofleds, NEOPIXEL, ledtype);
 Adafruit_TCS34725 tcs = Adafruit_TCS34725();
+Max44009 gy49(0x4a);
 WiFiClient espClient;
 PubSubClient client;
 U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
@@ -162,6 +177,7 @@ bool rtc_alarm_raised = false;
 bool light_on = true;
 bool pir_found = true;
 bool as3935_found = false;
+bool gy49_found = false;
 
 bool color_watch = false;
 
@@ -203,7 +219,14 @@ void publish_si7021();
 
 // LED routines
 void setled(byte r, byte g, byte b) {
-  led.setPixelColor(0, r, g, b);
+  if (has_white && r==g && r==b) {
+    if (r<255)
+      led.setPixelColor(0, 0, 0, 0, r);
+    else
+      led.setPixelColor(0, 255, 255, 255, 255);
+  } else {
+    led.setPixelColor(0, r, g, b);
+  }
   led_current_color = led.Color(r,g,b);
   if (light_on) {
     led.show();
@@ -211,7 +234,14 @@ void setled(byte r, byte g, byte b) {
 }
 
 void setled(byte n, byte r, byte g, byte b) {
-  led.setPixelColor(n, r, g, b);
+  if (has_white && r==g && r==b) {
+    if (r < 255)
+      led.setPixelColor(n, 0, 0, 0, r);
+    else
+      led.setPixelColor(n, 255, 255, 255, 255);
+  } else {
+    led.setPixelColor(n, r, g, b);
+  }
   if (n == 0)
     led_current_color = led.Color(r,g,b);
   if (light_on) {
@@ -256,6 +286,7 @@ void log_config () {
   Log.verbose(F("AS3935 int pin = %d"),as3935_input);
   Log.verbose(F("AS3935 tune cap = %d"),as3935_tunecap);
   Log.verbose(F("nrofleds = %d"),nrofleds);
+  Log.verbose(F("ledtype = %x"),ledtype);
   Log.verbose(F("CO2alert = %t"),Bco2alert);
 
 }
@@ -304,7 +335,12 @@ void write_config () {
   }
   doc["as3935_input"] = as3935_input;
   doc["as3935_tunecap"] = as3935_tunecap;
-  doc["nrofleds"] = nrofleds;
+
+  JsonObject leds;
+  leds = doc.createNestedObject("led");
+  leds["count"] = nrofleds;
+  leds["type"] = ledtype;
+
   doc["co2alert"] = Bco2alert;
 
 
@@ -601,21 +637,21 @@ void mqtt_publish(char *topic, char *msg) {
 }
 
 void mqtt_publish(const __FlashStringHelper *topic, const __FlashStringHelper *msg) {
-  char a[32],b[32];
-  snprintf(a,31,"%s",topic);
-  snprintf(b,31,"%s",msg);
+  char a[64],b[64];
+  snprintf(a,63,"%s",topic);
+  snprintf(b,63,"%s",msg);
   mqtt_publish(a,b);
 }
 
 void mqtt_publish(const __FlashStringHelper *topic, char *msg) {
-  char a[32];
-  snprintf(a,31,"%s",topic);
+  char a[64];
+  snprintf(a,63,"%s",topic);
   mqtt_publish(a,msg);
 }
 
 void mqtt_publish(const __FlashStringHelper *topic, const char *msg) {
-  char buf[32];
-  snprintf(buf,31,"%s",msg);
+  char buf[64];
+  snprintf(buf,63,"%s",msg);
   mqtt_publish(topic, buf);
 }
 
@@ -836,12 +872,23 @@ void setup_i2c() {
         si7021_found = si7021.begin();
         Log.notice("Si7021 found? %T",si7021_found);
       }
+
+      if (address == 0x4a) {
+        // GY-49
+        float l = gy49.getLux();
+        if (! gy49.getError()) {
+          gy49_found = true;
+          Log.notice(F("GY49 found at 0x%x"),address);
+        }
+      }
+
       if ((address >= 0x48) && (address <= 0x4b)) {
         ads1115 = Adafruit_ADS1115(address);
         ads1115.begin();
         ads1115_found = true;
         Log.notice(F("ADS1115 found at 0x%x"),address);
       }
+
       if (address == 0x5a) {
         // CCS811 Gas Sensor
         if (ccs.begin()){
@@ -915,6 +962,7 @@ void setup_logging() {
 void setup_led() {
   led.begin();
   led.show();
+  has_white = (ledtype >> 6) != ((ledtype >> 4) & 0x03);
 }
 
 // setup PIR motion detector
@@ -967,9 +1015,14 @@ void setup_readconfig() {
    if (as3935_input = root["as3935_input"]) {
      as3935_inconfig = true;
    }
-   if (nrofleds = root["nrofleds"]) {
+   if (nrofleds = root["led"]["count"]) {
      led.updateLength(nrofleds);
    }
+   if (ledtype = root["led"]["type"]) {
+     led.updateType(ledtype);
+     has_white = (ledtype >> 6) != ((ledtype >> 4) & 0x03);
+   }
+
    Bco2alert = root["co2alert"];
 
    as3935_tunecap = root["as3935_tunecap"];
@@ -994,28 +1047,36 @@ boolean setup_wifi() {
   WiFi.begin(Sssid.c_str(), Spass.c_str());
 
   int retries = 0;
+  bool ipv6found = false;
+  bool ipv4found = false;
+
+  #if LWIP_IPV6
+  for (bool configured = false; !configured;) {
+    for (auto addr : addrList) {
+      if (addr.isV6() && !addr.isLocal()) {
+        ipv6found = true;
+      }
+      if (addr.isV4()) {
+        ipv4found = true;
+      }
+      delay(500);
+      configured = (ipv4found && ipv6found);
+    }
+  }
+  #else
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
     retries++;
     Log.error(F("Wifi.status() = %d"),WiFi.status());
     if (retries > 20) {
       Log.error(F("Cannot connect to %s"),Sssid.c_str());;
-      return false;
+      return ipv6found;
     }
   }
   String myIP = String(WiFi.localIP().toString());
   String myMask = String(WiFi.subnetMask().toString());
   Log.verbose("Wifi connected as %s/%s",myIP.c_str(),myMask.c_str());
-
-  #if LWIP_IPV6
-  for (bool configured = false; !configured;) {
-    for (auto addr : addrList)
-      if (configured = addr.isV6() && !addr.isLocal()) {
-        break;
-      }
-      delay(500);
-  }
-  #endif
+#endif
   return true;
 }
 
@@ -1302,6 +1363,17 @@ void publish_status() {
 #if LWIP_IPV6
 for (auto a : addrList) {
   a.isV6() ? a.isLocal() ? linkLocal = a.toString() : ipv6 = a.toString() : ipv4 = a.toString();
+
+  Log.verbose(F("IF=%s index=%d legacy=%d IPv4=%d local=%d hostname='%s' addr= %s"),
+                a.ifname().c_str(),
+                a.ifnumber(),
+                a.isLegacy(),
+                a.addr().isV4(),
+                a.addr().isLocal(),
+                a.ifhostname(),
+                a.addr().toString().c_str());
+
+
 }
 
 mqtt_publish(F("status/ipv4"), ipv4.c_str());
@@ -1399,12 +1471,19 @@ void loop_publish_bme680() {
       mqtt_influx(F("humidity"), (float)iaqSensor.humidity);
       mqtt_publish(F("airpressure"), iaqSensor.pressure / 100.0F);
       mqtt_influx(F("airpressure"), iaqSensor.pressure / 100.0F);
+      mqtt_influx(F("gasResistance"),(float)iaqSensor.gasResistance);
+      mqtt_influx(F("compGasValue"),(float)iaqSensor.compGasValue);
       if (iaqSensor.runInStatus == 1 &&
           iaqSensor.stabStatus == 1) {
         mqtt_publish(F("CO2"), iaqSensor.co2Equivalent);
         mqtt_influx(F("CO2"), iaqSensor.co2Equivalent);
         mqtt_publish(F("airquality"), iaqSensor.iaq);
         mqtt_influx(F("airquality"), iaqSensor.iaq);
+        mqtt_influx(F("gasPercentage"),iaqSensor.gasPercentage);
+        Log.verbose(F("  co2Ac=%d iaqAc=%d compGasAccuracy=%d gasPercentageAcccuracy=%d"),
+          iaqSensor.co2Accuracy,iaqSensor.iaqAccuracy,
+          iaqSensor.compGasAccuracy,
+          iaqSensor.gasPercentageAcccuracy);
       }  else {
         Log.notice(F("bme60 runIn = %F stab = %F"),
                   iaqSensor.runInStatus,
@@ -1458,6 +1537,13 @@ void loop_publish_veml6070() {
   if (veml_found) {
     mqtt_publish("UV", veml.readUV());
     mqtt_influx("UV", veml.readUV());
+  }
+}
+
+void loop_publish_gy49() {
+  if (gy49_found) {
+    mqtt_publish(F("light"),(float)gy49.getLux());
+    mqtt_influx(F("light"),(float)gy49.getLux());
   }
 }
 
@@ -1706,6 +1792,8 @@ void loop() {
     loop_publish_bme680();
     client.loop();
     loop_publish_veml6070();
+    client.loop();
+    loop_publish_gy49();
     client.loop();
     loop_publish_si7021();
     client.loop();
