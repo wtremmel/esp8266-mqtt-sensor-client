@@ -27,11 +27,6 @@ const char compile_date[] = __DATE__ " " __TIME__;
 #include <Arduino.h>
 #include <ArduinoLog.h>
 
-#define LWIP_DEBUG 1
-#include <lwip/debug.h>
-#define UDP_DEBUG LWIP_DBG_ON
-#include <lwip-git-hash.h>
-
 
 #if defined(ARDUINO_ARCH_ESP8266)
 #include <ESP8266WiFi.h>
@@ -1050,7 +1045,7 @@ boolean setup_wifi() {
   bool ipv6found = false;
   bool ipv4found = false;
 
-  #if LWIP_IPV6
+  #if LWIP_IPV6 && defined(ARDUINO_ARCH_ESP8266)
   for (bool configured = false; !configured;) {
     for (auto addr : addrList) {
       if (addr.isV6() && !addr.isLocal()) {
@@ -1360,7 +1355,7 @@ void publish_status() {
 #endif
   mqtt_publish(F("status/CompileTime"), compile_date);
 
-#if LWIP_IPV6
+#if LWIP_IPV6 && defined(ARDUINO_ARCH_ESP8266)
 for (auto a : addrList) {
   a.isV6() ? a.isLocal() ? linkLocal = a.toString() : ipv6 = a.toString() : ipv4 = a.toString();
 
