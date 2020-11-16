@@ -40,6 +40,10 @@ ADC_MODE(ADC_VCC);
 #include <WiFi.h>
 #include <SPIFFS.h>
 
+#if defined(ESP32_CAMERA)
+#include "esp_camera.h"
+#endif
+
 #include "esp_bt.h"
 #include "esp_bt_main.h"
 #include "esp_bt_device.h"
