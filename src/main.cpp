@@ -42,6 +42,28 @@ ADC_MODE(ADC_VCC);
 
 #if defined(ESP32_CAMERA)
 #include "esp_camera.h"
+#include <WiFiClientSecure.h>
+#endif
+
+#if defined(BOARD_TTGO)
+#define PWDN_GPIO_NUM       -1
+#define RESET_GPIO_NUM      -1
+#define XCLK_GPIO_NUM       32
+#define SIOD_GPIO_NUM       13
+#define SIOC_GPIO_NUM       12
+
+#define Y9_GPIO_NUM         39
+#define Y8_GPIO_NUM         36
+#define Y7_GPIO_NUM         23
+#define Y6_GPIO_NUM         18
+#define Y5_GPIO_NUM         15
+#define Y4_GPIO_NUM         4
+#define Y3_GPIO_NUM         14
+#define Y2_GPIO_NUM         5
+
+#define VSYNC_GPIO_NUM      27
+#define HREF_GPIO_NUM       25
+#define PCLK_GPIO_NUM       19
 #endif
 
 #include "esp_bt.h"
@@ -177,6 +199,7 @@ bool light_on = true;
 bool pir_found = true;
 bool as3935_found = false;
 bool gy49_found = false;
+bool camera_found = false;
 
 bool color_watch = false;
 
@@ -214,6 +237,7 @@ void publish_as3935();
 void publish_bme280();
 void publish_bme680();
 void publish_si7021();
+void publish_camera();
 
 
 // LED routines
@@ -413,6 +437,10 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
       for (i=0; i < nrofleds; i++)
         setled(i,in[1].toInt(),in[2].toInt(),in[3].toInt());
     }
+  }
+
+  if (in[0] == "camera") {
+    publish_camera();
   }
 
   if (in[0] == "sensor") {
@@ -633,6 +661,13 @@ void mqtt_publish(char *topic, char *msg) {
   Log.verbose("MQTT Publish message [%s]:%s",mytopic,msg);
 
   client.publish(mytopic, msg);
+}
+
+void mqtt_publish(char *topic, uint8_t *buf, size_t len) {
+  char mytopic[50];
+  snprintf(mytopic, 50, "/%s/%s/%s", Ssite.c_str(), Sroom.c_str(),topic);
+
+  client.publish(mytopic,buf,len);
 }
 
 void mqtt_publish(const __FlashStringHelper *topic, const __FlashStringHelper *msg) {
@@ -970,6 +1005,60 @@ void setup_pir() {
   pirState = digitalRead(pirInput);
 }
 
+// setup camera (if any)
+void setup_camera() {
+#if defined(ESP32_CAMERA)
+  camera_config_t config;
+
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer = LEDC_TIMER_0;
+  config.pin_d0 = Y2_GPIO_NUM;
+  config.pin_d1 = Y3_GPIO_NUM;
+  config.pin_d2 = Y4_GPIO_NUM;
+  config.pin_d3 = Y5_GPIO_NUM;
+  config.pin_d4 = Y6_GPIO_NUM;
+  config.pin_d5 = Y7_GPIO_NUM;
+  config.pin_d6 = Y8_GPIO_NUM;
+  config.pin_d7 = Y9_GPIO_NUM;
+  config.pin_xclk = XCLK_GPIO_NUM;
+  config.pin_pclk = PCLK_GPIO_NUM;
+  config.pin_vsync = VSYNC_GPIO_NUM;
+  config.pin_href = HREF_GPIO_NUM;
+  config.pin_sscb_sda = SIOD_GPIO_NUM;
+  config.pin_sscb_scl = SIOC_GPIO_NUM;
+  config.pin_pwdn = PWDN_GPIO_NUM;
+  config.pin_reset = RESET_GPIO_NUM;
+  config.xclk_freq_hz = 20000000;
+  config.pixel_format = PIXFORMAT_JPEG;
+  //init with high specs to pre-allocate larger buffers
+  if (psramFound()) {
+      Log.verbose(F("psram found"));
+      config.frame_size = FRAMESIZE_UXGA;
+      config.jpeg_quality = 10;
+      config.fb_count = 2;
+  } else {
+      config.frame_size = FRAMESIZE_SVGA;
+      config.jpeg_quality = 12;
+      config.fb_count = 1;
+  };
+
+#if defined(BOARD_TTGO)
+  pinMode(13, INPUT_PULLUP);
+  pinMode(14, INPUT_PULLUP);
+#endif
+  esp_err_t err = esp_camera_init(&config);
+
+  if (err == ESP_OK) {
+    camera_found = true;
+  } else {
+    Log.error(F("esp32 camera error 0x%x"),err);
+    return;
+  }
+
+
+#endif
+}
+
 // read the config file and parse its data
 void setup_readconfig() {
   SPIFFS.begin();
@@ -1285,6 +1374,7 @@ void setup() {
   } else {
     setled(2,1,0);
   }
+  setup_camera();
   publish_status();
   if (as3935_found)
     pinMode(as3935_input, INPUT);
@@ -1346,6 +1436,7 @@ void publish_status() {
   if (ads1115_found) mqtt_publish(status,F("ads1115_found"));
   if (ccs811_found) mqtt_publish(status,F("ccs811_found"));
   if (pir_found) mqtt_publish(status,F("pir_found"));
+  if (camera_found) mqtt_publish(status,F("camera_found"));
   if (as3935_found) {
     mqtt_publish(status, F("as3935_found"));
     publish_as3935();
@@ -1750,6 +1841,108 @@ void loop_as3935() {
       Log.verbose(F("as3935: WatchDogVal %d"),watchDogVal);
     }
   }
+}
+
+#define BOUNDARY     "--------------------------133747188241686651551404"
+String body(String content , String message)
+{
+  String data;
+  data = "--";
+  data += BOUNDARY;
+  data += F("\r\n");
+  if(content=="imageFile")
+  {
+    data += F("Content-Disposition: form-data; name=\"imageFile\"; filename=\"picture.jpg\"\r\n");
+    data += F("Content-Type: image/jpeg\r\n");
+    data += F("\r\n");
+  }
+  else
+  {
+    data += "Content-Disposition: form-data; name=\"" + content +"\"\r\n";
+    data += "\r\n";
+    data += message;
+    data += "\r\n";
+  }
+   return(data);
+
+}
+
+String header(String token,size_t length)
+{
+  String  data;
+      data =  F("POST /receive/upload.php HTTP/1.1\r\n");
+      data += F("cache-control: no-cache\r\n");
+      data += F("Content-Type: multipart/form-data; boundary=");
+      data += BOUNDARY;
+      data += "\r\n";
+      data += F("User-Agent: PostmanRuntime/6.4.1\r\n");
+      data += F("Accept: */*\r\n");
+      data += F("Host: ");
+      data += F("lancre.garf.de");
+      data += F("\r\n");
+      data += F("accept-encoding: gzip, deflate\r\n");
+      data += F("Connection: keep-alive\r\n");
+      data += F("content-length: ");
+      data += String(length);
+      data += "\r\n";
+      data += "\r\n";
+    return(data);
+}
+
+
+String sendImage(String token,String message, uint8_t *data_pic,size_t size_pic)
+{
+  String bodyTxt =  body("uploadBtn",message);
+  String bodyPic =  body("imageFile",message);
+  String bodyEnd =  String("--")+BOUNDARY+String("--\r\n");
+  size_t allLen = bodyTxt.length()+bodyPic.length()+size_pic+bodyEnd.length();
+  String headerTxt =  header(token,allLen);
+  WiFiClient http;
+
+  if (!http.connect("lancre.garf.de",80))
+  {
+    return("connection failed");
+  }
+
+   http.print(headerTxt+bodyTxt+bodyPic);
+   http.write(data_pic,size_pic);
+   http.print("\r\n"+bodyEnd);
+
+   delay(20);
+   long tOut = millis() + 100000;
+   while(http.connected() && tOut > millis())
+   {
+    if (http.available())
+    {
+      String serverRes = http.readStringUntil('\r');
+        return(serverRes);
+    }
+   }
+}
+
+
+void publish_camera() {
+#if defined(ESP32_CAMERA)
+  sensor_t *s = esp_camera_sensor_get();
+  camera_fb_t *fb = NULL;
+  esp_err_t res = ESP_OK;
+
+  Log.verbose(F("camera framesize: %u"),s->status.framesize);
+  fb = esp_camera_fb_get();
+  if (!fb) {
+    Log.error(F("camera capture failed"));
+    return;
+  } else {
+    Log.verbose(F("camera format %d"), fb->format);
+    Log.verbose(F("camera buf size %d"), fb->len);
+  }
+
+  Log.verbose(F("sending Image"));
+  Log.verbose(F("sent Image: %s"),sendImage("x1","Upload",fb->buf,fb->len).c_str());
+
+
+  esp_camera_fb_return(fb);
+#endif
 }
 
 void loop() {
