@@ -402,6 +402,21 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
     }
   }
 
+  if (in[0] == "ledb") {
+    // led in binary code
+    int position = 5;
+    int thisled = 0;
+    while ((position < length-3) && (thisled < nrofleds)) {
+      // 3 bytes per led: red green blue
+      setled(thisled,
+        payload[position],
+        payload[position+1],
+        payload[position+2]);
+      position +=3;
+      thisled++;
+    }
+  }
+
   if (in[0] == "leds") {
     // apply to all leds
     if (wordcounter == 3) {
