@@ -436,10 +436,12 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
       setled(thisled,
         payload[position],
         payload[position+1],
-        payload[position+2]);
+        payload[position+2],
+        0);
       position +=3;
       thisled++;
     }
+    setled(1); // show result
   }
 
   if (in[0] == "leds") {
@@ -1117,7 +1119,14 @@ void setup_mqtt() {
   client.setClient(espClient);
   client.setServer(Smqttserver.c_str(), Imqttport);
   client.setCallback(mqtt_callback);
-
+  if (nrofleds > 70) {
+    uint16_t newsize = nrofleds*3+40;
+    if (client.setBufferSize(newsize)) {
+      Log.verbose(F("MQTT Buffer size %d"),newsize);
+    } else {
+      Log.error(F("error resizing MQTT buffer to %d"),newsize);
+    }
+  }
 }
 
 
