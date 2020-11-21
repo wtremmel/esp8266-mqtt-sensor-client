@@ -213,6 +213,31 @@ void publish_si7021();
 
 
 // LED routines
+
+uint32_t toColor(byte r, byte g, byte b) {
+  byte w = 0;
+  if (has_white && r==g && r==b) {
+    if (r<255) {
+      w = r;
+      r = 0; g = 0; b = 0;
+    } else {
+      w = 255;
+    }
+  }
+  return b + (g<<8) + (r<<16) + (w<<24);
+}
+
+uint32_t toColor(byte r, byte g, byte b, byte w) {
+  return  b + (g<<8) + (r<<16) + (w<<24);
+}
+
+void setallleds(byte r, byte g, byte b) {
+  led.fill(toColor(r,g,b),0,nrofleds);
+  if (light_on) {
+    led.show();
+  }
+}
+
 void setled(byte r, byte g, byte b) {
   if (has_white && r==g && r==b) {
     if (r<255)
@@ -420,9 +445,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
   if (in[0] == "leds") {
     // apply to all leds
     if (wordcounter == 3) {
-      int i;
-      for (i=0; i < nrofleds; i++)
-        setled(i,in[1].toInt(),in[2].toInt(),in[3].toInt());
+      setallleds(in[1].toInt(),in[2].toInt(),in[3].toInt());
     }
   }
 
