@@ -253,6 +253,8 @@ void setled(byte r, byte g, byte b) {
   }
 }
 
+
+
 void setled(byte n, byte r, byte g, byte b) {
   if (has_white && r==g && r==b) {
     if (r < 255)
@@ -398,12 +400,14 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
 
   String in[10];
   unsigned int wordcounter = 0;
+  unsigned int index[10];
 
   for (unsigned int i = 0; i < length; i++) {
     if ((char)payload[i] == ' ' && wordcounter < 9) {
       wordcounter++;
     } else {
       in[wordcounter] += String((char)payload[i]);
+      index[wordcounter] = i;
     }
   }
   Log.verbose("Message arrived[%s]: %d Words",topic,wordcounter);
@@ -442,6 +446,54 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
       thisled++;
     }
     setled(1); // show result
+  }
+
+  if (in[0] == "ledfade") {
+    // fade from current led state to new one
+    bool complete = false;
+    while (!complete) {
+      int position = 8;
+      int thisled = 0;
+      complete = true;
+      while ((position < length-3) && (thisled < nrofleds)) {
+        uint32_t currentColor;
+        byte cR, cG, cB;
+        currentColor = led.getPixelColor(thisled);
+        cB = currentColor & 0xff;
+        currentColor >>= 8;
+        cG = currentColor & 0xff;
+        currentColor >>= 8;
+        cR = currentColor & 0xff;
+
+        if (cR > payload[position]) {
+          cR--; complete = false;
+        }
+        else if (cR < payload[position]) {
+          cR++; complete = false;
+        }
+
+        if (cG > payload[position+1]) {
+          cG--; complete = false;
+        }
+        else if (cG < payload[position+1]) {
+          cG++; complete = false;
+        }
+
+        if (cB > payload[position+2]) {
+          cB--; complete = false;
+        }
+        else if (cB < payload[position+2]) {
+          cB++; complete = false;
+        }
+
+        if (!complete) {
+          setled(thisled,cR,cG,cB,0);
+        }
+        position += 3;
+        thisled++;
+      }
+      setled(1);
+    }
   }
 
   if (in[0] == "leds") {
