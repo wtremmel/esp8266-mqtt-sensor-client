@@ -22,9 +22,13 @@
   },
   "led":{
     "count":1,
-    "type":0x52
+    "type":82
   },
   "sensors":{
+    "as3935":{
+      "input":13,
+      "tunecap":96
+    },
     "bme280":{
       "tempadjust":-5.2
     },
@@ -38,8 +42,5 @@
       "pin":12
     }
   },
-  "as3935_input":13,
-  "as3935_tunecap":0x00,
-  "nrofleds":8,
   "co2alert":true
 }
