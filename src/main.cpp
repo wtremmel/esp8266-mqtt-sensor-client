@@ -355,8 +355,12 @@ void write_config () {
     pir = sensors.createNestedObject("pir");
     pir["pin"] = pirInput;
   }
-  doc["as3935_input"] = as3935_input;
-  doc["as3935_tunecap"] = as3935_tunecap;
+
+  if (as3935_found || as3935_inconfig) {
+    JsonObject as3935 = sensors.createNestedObject("as3935");
+    as3935["input"] = as3935_input;
+    as3935["tunecap"] = as3935_tunecap;
+  }
 
   JsonObject leds;
   leds = doc.createNestedObject("led");
@@ -400,14 +404,12 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
 
   String in[10];
   unsigned int wordcounter = 0;
-  unsigned int index[10];
 
   for (unsigned int i = 0; i < length; i++) {
     if ((char)payload[i] == ' ' && wordcounter < 9) {
       wordcounter++;
     } else {
       in[wordcounter] += String((char)payload[i]);
-      index[wordcounter] = i;
     }
   }
   Log.verbose("Message arrived[%s]: %d Words",topic,wordcounter);
@@ -433,7 +435,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
 
   if (in[0] == "ledb") {
     // led in binary code
-    int position = 5;
+    unsigned int position = 5;
     int thisled = 0;
     while ((position < length-3) && (thisled < nrofleds)) {
       // 3 bytes per led: red green blue
@@ -452,7 +454,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
     // fade from current led state to new one
     bool complete = false;
     while (!complete) {
-      int position = 8;
+      unsigned int position = 8;
       int thisled = 0;
       complete = true;
       while ((position < length-3) && (thisled < nrofleds)) {
@@ -725,14 +727,14 @@ void mqtt_publish(char *topic, char *msg) {
 
 void mqtt_publish(const __FlashStringHelper *topic, const __FlashStringHelper *msg) {
   char a[64],b[64];
-  snprintf(a,63,"%s",topic);
-  snprintf(b,63,"%s",msg);
+  snprintf(a,63,"%s",(char *)topic);
+  snprintf(b,63,"%s",(char *)msg);
   mqtt_publish(a,b);
 }
 
 void mqtt_publish(const __FlashStringHelper *topic, char *msg) {
   char a[64];
-  snprintf(a,63,"%s",topic);
+  snprintf(a,63,"%s",(char *)topic);
   mqtt_publish(a,msg);
 }
 
@@ -751,13 +753,13 @@ void mqtt_publish(char *topic, int i) {
 
 void mqtt_publish(char *topic, uint32_t i) {
   char buf[32];
-  snprintf(buf,31,"%lu",i);
+  snprintf(buf,31,"%u",i);
   mqtt_publish(topic,buf);
 }
 
 void mqtt_publish(const __FlashStringHelper *topic, uint32_t i) {
   char buf[32];
-  snprintf(buf,31,"%lu",i);
+  snprintf(buf,31,"%u",i);
   mqtt_publish(topic,buf);
 }
 
@@ -780,7 +782,7 @@ void mqtt_influx(char *field, char *value) {
 
   sprintf(out,"sensor,site=%s,room=%s %s=%s",
     Ssite.c_str(), Sroom.c_str(),field,value);
-  mqtt_publish("influx",out);
+  mqtt_publish(F("influx"),out);
 }
 
 void mqtt_influx(char *field, int i) {
@@ -797,27 +799,27 @@ void mqtt_influx(char *field, float f) {
 
 void mqtt_influx(char *field, uint32_t i) {
   char buf[32];
-  snprintf(buf,31,"%lu",i);
+  snprintf(buf,31,"%u",i);
   mqtt_influx(field,buf);
 }
 
 void mqtt_influx(char *field, bool b) {
   if (b)
-    mqtt_influx(field,"true");
+    mqtt_influx(field,F("true"));
   else
-    mqtt_influx(field,"false");
+    mqtt_influx(field,F("false"));
 }
 
 void mqtt_influx(const __FlashStringHelper *topic, const __FlashStringHelper *msg) {
   char a[32],b[32];
-  snprintf(a,31,"%s",topic);
-  snprintf(b,31,"%s",msg);
+  snprintf(a,31,"%s",(char *)topic);
+  snprintf(b,31,"%s",(char *)msg);
   mqtt_influx(a,b);
 }
 
 void mqtt_influx(const __FlashStringHelper *topic, char *msg) {
   char a[32];
-  snprintf(a,31,"%s",topic);
+  snprintf(a,31,"%s",(char *)topic);
   mqtt_influx(a,msg);
 }
 
@@ -829,7 +831,7 @@ void mqtt_influx(const __FlashStringHelper *topic, const char *msg) {
 
 void mqtt_influx(const __FlashStringHelper *topic, uint32_t i) {
   char buf[32];
-  snprintf(buf,31,"%lu",i);
+  snprintf(buf,31,"%u",i);
   mqtt_influx(topic,buf);
 }
 
@@ -965,11 +967,11 @@ void setup_i2c() {
         float l = gy49.getLux();
         if (! gy49.getError()) {
           gy49_found = true;
-          Log.notice(F("GY49 found at 0x%x"),address);
+          Log.notice(F("GY49 found at 0x%x, current Lux %F"),address,l);
         }
       }
 
-      if ((address >= 0x48) && (address <= 0x4b)) {
+      if ((address >= 0x48) && (address <= 0x4b) && (address != 0x4a)) {
         ads1115 = Adafruit_ADS1115(address);
         ads1115.begin();
         ads1115_found = true;
@@ -1099,21 +1101,21 @@ void setup_readconfig() {
    bme680TempAdjust = root["sensors"]["bme680"]["tempadjust"];
    si7021TempAdjust = root["sensors"]["si7021"]["tempadjust"];
 
-   if (as3935_input = root["as3935_input"]) {
+   if ((as3935_input = root["sensors"]["as3935"]["input"])) {
+     as3935_tunecap = root["sensors"]["as3935"]["tunecap"];
      as3935_inconfig = true;
    }
-   if (nrofleds = root["led"]["count"]) {
+   if ((nrofleds = root["led"]["count"])) {
      led.updateLength(nrofleds);
    }
-   if (ledtype = root["led"]["type"]) {
+   if ((ledtype = root["led"]["type"])) {
      led.updateType(ledtype);
      has_white = (ledtype >> 6) != ((ledtype >> 4) & 0x03);
    }
 
    Bco2alert = root["co2alert"];
 
-   as3935_tunecap = root["as3935_tunecap"];
-   if (pirInput = root["sensors"]["pir"]["pin"]) {
+   if ((pirInput = root["sensors"]["pir"]["pin"])) {
      pir_found = true;
    } else {
      pir_found = false;
@@ -1133,7 +1135,7 @@ boolean setup_wifi() {
 #endif
   WiFi.begin(Sssid.c_str(), Spass.c_str());
 
-  int retries = 0;
+  // int retries = 0;
   bool ipv6found = false;
   bool ipv4found = false;
 
@@ -1400,23 +1402,23 @@ void publish_as3935() {
   }
   char buf[32];
 
-  snprintf(buf,31,"%s %d",F("Watchdog Threshold"),
+  snprintf(buf,31,"%s %d",(char *)F("Watchdog Threshold"),
       (int)(as3935.readWatchdogThreshold()));
   mqtt_publish(s,buf);
 
-  snprintf(buf,31,"%s %d",F("Noise Level"),
+  snprintf(buf,31,"%s %d",(char *)F("Noise Level"),
       (int)(as3935.readNoiseLevel()));
   mqtt_publish(s,buf);
 
-  snprintf(buf,31,"%s %d",F("Spike Rejection"),
+  snprintf(buf,31,"%s %d",(char *)F("Spike Rejection"),
       (int)(as3935.readSpikeRejection()));
   mqtt_publish(s,buf);
 
-  snprintf(buf,31,"%s %d",F("Lightning numbers threshold"),
+  snprintf(buf,31,"%s %d",(char *)F("Lightning numbers threshold"),
       (int)(as3935.readLightningThreshold()));
   mqtt_publish(s,buf);
 
-  snprintf(buf,31,"%s %d",F("Tuning capacitor"),
+  snprintf(buf,31,"%s %d",(char *)F("Tuning capacitor"),
       (int)(as3935.readTuneCap()));
   mqtt_publish(s,buf);
 
@@ -1424,8 +1426,7 @@ void publish_as3935() {
 }
 
 void publish_status() {
-  const __FlashStringHelper *status = F("status/sensors"),
-   *net = F("status/network");
+  const __FlashStringHelper *status = F("status/sensors");
   String ipv4, ipv6, linkLocal;
 
 
@@ -1480,21 +1481,19 @@ mqtt_publish(F("status/ipv6"), ipv6.c_str());
 
 void loop_publish_voltage(){
 #if defined(ARDUINO_ARCH_ESP8266)
-  mqtt_publish("voltage", (float)(ESP.getVcc() / 1000.0));
-  mqtt_influx("voltage", (float)(ESP.getVcc() / 1000.0));
+  mqtt_publish(F("voltage"), (float)(ESP.getVcc() / 1000.0));
+  mqtt_influx(F("voltage"), (float)(ESP.getVcc() / 1000.0));
 #endif
 }
 
 void loop_publish_tsl2561() {
   if (tsl2561_found) {
-    sensors_event_t event;
-
     if (tsl2561.begin()) {
       uint16_t br, ir;
       tsl2561.getLuminosity(&br, &ir);
       uint32_t lux = tsl2561.calculateLux(br, ir);
-      mqtt_publish("light",lux);
-      mqtt_influx("light",lux);
+      mqtt_publish(F("light"),lux);
+      mqtt_influx(F("light"),lux);
     } else {
       Log.verbose("loop_publish_tsl2561: Sensor not initialized");
     }
@@ -1524,12 +1523,12 @@ void publish_si7021() {
 
 void loop_publish_bme280() {
   if (bme280_found) {
-    mqtt_publish("temperature", bme280.readTemperature());
-    mqtt_publish("airpressure", bme280.readPressure() / 100.0F);
-    mqtt_publish("humidity", bme280.readHumidity());
-    mqtt_influx("temperature", bme280.readTemperature());
-    mqtt_influx("airpressure", bme280.readPressure() / 100.0F);
-    mqtt_influx("humidity", bme280.readHumidity());
+    mqtt_publish(F("temperature"), bme280.readTemperature());
+    mqtt_publish(F("airpressure"), bme280.readPressure() / 100.0F);
+    mqtt_publish(F("humidity"), bme280.readHumidity());
+    mqtt_influx(F("temperature"), bme280.readTemperature());
+    mqtt_influx(F("airpressure"), bme280.readPressure() / 100.0F);
+    mqtt_influx(F("humidity"), bme280.readHumidity());
   }
 }
 
@@ -1612,15 +1611,15 @@ void loop_publish_bme680() {
 #else // Adafruit
 void loop_publish_bme680() {
   if (bme680_found && bme680.performReading()) {
-    mqtt_publish("temperature", (float) (bme680.temperature + bme680TempAdjust));
-    mqtt_publish("airpressure", bme680.pressure / 100.0F);
-    mqtt_publish("humidity", (float)bme680.humidity);
-    mqtt_publish("airquality", bme680.gas_resistance / 1000.0F);
+    mqtt_publish(F("temperature"), (float) (bme680.temperature + bme680TempAdjust));
+    mqtt_publish(F("airpressure"), bme680.pressure / 100.0F);
+    mqtt_publish(F("humidity"), (float)bme680.humidity);
+    mqtt_publish(F("airquality"), bme680.gas_resistance / 1000.0F);
 
-    mqtt_influx("temperature", (float)bme680.temperature);
-    mqtt_influx("airpressure", bme680.pressure / 100.0F);
-    mqtt_influx("humidity", (float)bme680.humidity);
-    mqtt_influx("airquality", bme680.gas_resistance / 1000.0F);
+    mqtt_influx(F("temperature"), (float)bme680.temperature);
+    mqtt_influx(F("airpressure"), bme680.pressure / 100.0F);
+    mqtt_influx(F("humidity"), (float)bme680.humidity);
+    mqtt_influx(F("airquality"), bme680.gas_resistance / 1000.0F);
 
   }
 }
@@ -1629,8 +1628,8 @@ void loop_publish_bme680() {
 
 void loop_publish_veml6070() {
   if (veml_found) {
-    mqtt_publish("UV", veml.readUV());
-    mqtt_influx("UV", veml.readUV());
+    mqtt_publish(F("UV"), (unsigned int) veml.readUV());
+    mqtt_influx(F("UV"), (unsigned int) veml.readUV());
   }
 }
 
@@ -1641,7 +1640,7 @@ void loop_publish_gy49() {
   }
 }
 
-int co2ampel(int co2value) {
+unsigned int co2ampel(unsigned int co2value) {
   if (Bco2alert) {
     if (co2value <=1000) {
       setled(0,255,0);
@@ -1659,10 +1658,10 @@ void loop_publish_ccs811() {
   if (ccs811_found) {
     if (ccs.available()) {
       if (!ccs.readData()) {
-        mqtt_publish("CO2", co2ampel(ccs.geteCO2()));
-        mqtt_publish("TVOC", ccs.getTVOC());
-        mqtt_influx("CO2",co2ampel(ccs.geteCO2()));
-        mqtt_influx("TVOC",ccs.getTVOC());
+        mqtt_publish(F("CO2"), co2ampel(ccs.geteCO2()));
+        mqtt_publish(F("TVOC"), (unsigned int) ccs.getTVOC());
+        mqtt_influx(F("CO2"),co2ampel(ccs.geteCO2()));
+        mqtt_influx(F("TVOC"),(unsigned int) ccs.getTVOC());
       } else {
         Log.verbose(F("Error reading data from CCS811"));
       }
@@ -1675,10 +1674,10 @@ void loop_publish_ccs811() {
 
 void loop_publish_si7021() {
   if (si7021_found) {
-    mqtt_publish("temperature", si7021.readTemperature() + si7021TempAdjust);
-    mqtt_publish("humidity", si7021.readHumidity());
-    mqtt_influx("temperature", si7021.readTemperature() + si7021TempAdjust);
-    mqtt_influx("humidity", si7021.readHumidity());
+    mqtt_publish(F("temperature"), si7021.readTemperature() + si7021TempAdjust);
+    mqtt_publish(F("humidity"), si7021.readHumidity());
+    mqtt_influx(F("temperature"), si7021.readTemperature() + si7021TempAdjust);
+    mqtt_influx(F("humidity"), si7021.readHumidity());
   }
 }
 
@@ -1696,7 +1695,7 @@ void loop_publish_tcs34725() {
     int d3 = abs(g-b);
 
     int maxdist = max(max(d1,d2),d3);
-    int mindist = min(min(d1,d2),d3);
+    // int mindist = min(min(d1,d2),d3);
 
     if (maxdist > 40) {
       r = map(r,minval,maxval,0,255);
@@ -1722,8 +1721,8 @@ void loop_publish_motion(bool m) {
 
   lastReportTime = millis();
   lastReportState = m;
-  mqtt_influx("motion", m);
-  mqtt_publish("motion", (int) m);
+  mqtt_influx(F("motion"), (unsigned int) m);
+  mqtt_publish(F("motion"), (unsigned int) m);
 }
 
 int loop_get_lox_distance() {
