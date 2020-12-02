@@ -272,7 +272,14 @@ void setled(byte n, byte r, byte g, byte b) {
 }
 
 void setled(byte n, byte r, byte g, byte b, byte show) {
-  led.setPixelColor(n, r, g, b);
+  if (has_white && r==g && r==b) {
+    if (r < 255)
+      led.setPixelColor(n, 0, 0, 0, r);
+    else
+      led.setPixelColor(n, 255, 255, 255, 255);
+  } else {
+    led.setPixelColor(n, r, g, b);
+  }
   if (light_on && show) {
     led.show();
   }
