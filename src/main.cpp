@@ -212,6 +212,8 @@ DateTime rtcnow;
 byte clock_dst = 0;
 int clock_timezone = 1;
 byte clock_topled = 0;
+bool countdown_mode=false;
+uint32_t countdown_until;
 
 
 // Timer variables
@@ -635,17 +637,20 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
   }
 
   if (in[0] == F("clock") && rtc_found) {
-    if (wordcounter == 1) {
+    if (wordcounter >= 1) {
       if (in[1] == F("enable")) {
+        // clock enable
         clock_enabled = true;
       }
       if (in[1] == F("disable")) {
+        // clock disable
         if (clock_enabled)
           setallleds(0, 0, 0);
         clock_enabled = false;
       }
     }
     if (wordcounter > 0 && in[1] == F("set")) {
+      // clock set year month day hour minute second
       if (wordcounter == 7) {
         rtc.adjust(DateTime(
           atoi(in[2].c_str()), // year
@@ -654,6 +659,31 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
           atoi(in[5].c_str()), // hour
           atoi(in[6].c_str()), // minute
           atoi(in[7].c_str()))); // second
+      }
+    }
+    if (wordcounter >= 2 && in[1] == F("countdown")) {
+      countdown_mode = true;
+
+      if (wordcounter == 2 and in[2] == "cancel") {
+        countdown_mode = false;
+      }
+      // clock countdown seconds
+      else if (wordcounter == 2) {
+        countdown_until = millis() + in[2].toInt()*1000;
+      }
+      // clock countdown minutes seconds
+      else if (wordcounter == 3) {
+        countdown_until = millis() +
+          in[2].toInt()*60*1000 +
+          in[3].toInt()*1000;
+      }
+      else if (wordcounter == 4) {
+        countdown_until = millis() +
+          in[2].toInt()*60*60*1000 +
+          in[3].toInt()*60*1000 +
+          in[4].toInt()*1000;
+      } else {
+        countdown_mode=false;
       }
     }
   }
@@ -1967,9 +1997,9 @@ int rrmap(int in) {
     return in;
 }
 
+static unsigned long lastDisplay;
 
 void loop_displaytime() {
-  static unsigned long lastDisplay;
   if ((millis() - lastDisplay) < 1000)
     return;
 
@@ -1999,11 +2029,74 @@ void loop_displaytime() {
   setled(1); // show leds
 }
 
+bool display_countdown() {
+  int seconds_left = (countdown_until - millis())/1000;
+  if (seconds_left <= 0) {
+    countdown_mode = false;
+    return false;
+  }
+  // display countdown
+  // - seconds moving backwards
+  // - number of hours left shown in hour colors
+  // - number of minutes left shown in minute colors
+  // - if hours and minutes are zero, 60 red leds count down
+
+  // display minutes, overwrite with hours, than seconds
+
+  if (seconds_left < 60) {
+    for (int i=0; i < nrofleds;i++) {
+      if (i<seconds_left)
+        setled(i,255,0,0,0);
+      else
+        setled(i,0,0,0,0);
+
+    }
+  } else if ((seconds_left + 15) % 30 < 3) {
+    // display time every 30 seconds for 3 seconds
+    loop_displaytime();
+  } else {
+    if ((millis() - lastDisplay) < 1000)
+      return true;
+    else
+      lastDisplay=millis();
+
+    int hours_left = seconds_left / (60*60);
+    int minutes_left = (seconds_left / 60) - (hours_left * 60);
+    int second_tick = seconds_left % 60;
+    int i;
+    for (i = 0; i < minutes_left; i++) {
+      setledcolor(i,minutecolor,0);
+    }
+    for (;i < nrofleds;i++){
+      setledcolor(i,0,0);
+    }
+    for (i = 0; i < hours_left; i++) {
+      setledcolor(i,hourcolor,0);
+    }
+    setledcolor(second_tick,secondcolor,0);
+  }
+  setled(1);
+  return true;
+}
+
 void loop() {
   // put your main code here, to run repeatedly:
   client.loop();
 
-  if (clock_enabled)
+  if (countdown_mode) {
+    if (!display_countdown()) {
+      // countdown done
+      for (int i=0;i<10;i++) {
+        setallleds(255, 0, 0);
+        delay(50);
+        setallleds(0, 0, 0);
+        delay(50);
+        client.loop();
+      }
+    }
+  }
+
+  else if (clock_enabled)
     loop_displaytime();
 
   if (!client.connected()) {
