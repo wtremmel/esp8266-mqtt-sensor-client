@@ -106,6 +106,8 @@ const uint8_t bsec_config_iaq[] = {
 #include <U8x8lib.h>
 #include <SparkFun_AS3935.h>
 #include <Max44009.h>
+#include "RTClib.h"
+
 
 // Global defines
 #define NEOPIXEL 14 //D5
@@ -134,6 +136,7 @@ SparkFun_AS3935 as3935(AS3935_ADDR);
 Adafruit_NeoPixel led = Adafruit_NeoPixel(nrofleds, NEOPIXEL, ledtype);
 Adafruit_TCS34725 tcs = Adafruit_TCS34725();
 Max44009 gy49(0x4a);
+RTC_DS3231 rtc;
 WiFiClient espClient;
 PubSubClient client;
 U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
@@ -173,6 +176,9 @@ bool light_on = true;
 bool pir_found = true;
 bool as3935_found = false;
 bool gy49_found = false;
+bool rtc_found = false;
+bool rtc_timeok = false;
+bool clock_enabled = false;
 
 bool color_watch = false;
 
@@ -196,6 +202,17 @@ float si7021TempAdjust = 0.0;
 unsigned int display_what = DISPLAY_TEMPHUM;
 unsigned int display_brightness = 1;
 bool display_refresh = true;
+
+// Clock variables
+uint32_t hourcolor = 0xff00,
+  minutecolor = 0xff0000,
+  secondcolor = 0xffffff,
+  hourtickcolor = 0x000005;
+DateTime rtcnow;
+byte clock_dst = 0;
+int clock_timezone = 1;
+byte clock_topled = 0;
+
 
 // Timer variables
 unsigned long now;
@@ -285,6 +302,15 @@ void setled(byte n, byte r, byte g, byte b, byte show) {
   }
 }
 
+void setledcolor(byte n, uint32_t color, byte show) {
+  byte r,g,b;
+  b = color & 0xff;
+  g = (color >> 8) & 0xff;
+  r = (color >> 16) & 0xff;
+  // w = (color >> 24) & 0xff;
+  setled(n,r,g,b,show);
+}
+
 void setled(byte show) {
   if (!show) {
     int i;
@@ -339,6 +365,16 @@ void write_config () {
   location["site"] = Ssite;
   location["room"] = Sroom;
   location["indoor"] = Bindoor;
+
+  JsonObject clock = doc.createNestedObject("clock");
+  clock["enabled"] = clock_enabled;
+  clock["timezone"] = clock_timezone;
+  clock["dst"] = clock_dst;
+  clock["hourcolor"] = hourcolor;
+  clock["minutecolor"] = minutecolor;
+  clock["secondcolor"] = secondcolor;
+  clock["hourtickcolor"] = hourtickcolor;
+  clock["topled"] = clock_topled;
 
   JsonObject sensors = doc.createNestedObject("sensors");
 
@@ -432,7 +468,15 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
   }
 
   if (in[0] == "led") {
-    if (wordcounter == 3) {
+    if (wordcounter == 2) {
+      // led brightness x
+      if (in[1] == "brightness") {
+        Log.notice(F("Brightness: %d"),led.getBrightness());
+        led.setBrightness(in[2].toInt());
+        Log.notice(F("Brightness: %d"),led.getBrightness());
+      }
+    }
+    else if (wordcounter == 3) {
       // led r g b
       setled(in[1].toInt(),in[2].toInt(),in[3].toInt());
     } else if (wordcounter == 4) {
@@ -586,6 +630,30 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
           si7021TempAdjust = atof(in[3].c_str());
           publish_si7021();
         }
+      }
+    }
+  }
+
+  if (in[0] == F("clock") && rtc_found) {
+    if (wordcounter == 1) {
+      if (in[1] == F("enable")) {
+        clock_enabled = true;
+      }
+      if (in[1] == F("disable")) {
+        if (clock_enabled)
+          setallleds(0, 0, 0);
+        clock_enabled = false;
+      }
+    }
+    if (wordcounter > 0 && in[1] == F("set")) {
+      if (wordcounter == 7) {
+        rtc.adjust(DateTime(
+          atoi(in[2].c_str()), // year
+          atoi(in[3].c_str()), // month
+          atoi(in[4].c_str()), // day
+          atoi(in[5].c_str()), // hour
+          atoi(in[6].c_str()), // minute
+          atoi(in[7].c_str()))); // second
       }
     }
   }
@@ -985,6 +1053,10 @@ void setup_i2c() {
         Log.notice(F("ADS1115 found at 0x%x"),address);
       }
 
+      if (address == 0x57) {
+        // ATMEL732
+      }
+
       if (address == 0x5a) {
         // CCS811 Gas Sensor
         if (ccs.begin()){
@@ -997,6 +1069,26 @@ void setup_i2c() {
             ccs.setDriveMode(CCS811_DRIVE_MODE_60SEC);
         }
       }
+
+      if (address == 0x68) {
+        // DS3231 Clock
+        if (rtc.begin()) {
+          rtc_found = true;
+          Log.notice(F("DS3231 RT found at 0x%x"),address);
+          // check if power ok
+          if (rtc.lostPower()) {
+            rtc_timeok = false;
+            Log.error(F("DS3231 lost power - set time"));
+          } else {
+            rtc_timeok = true;
+            rtcnow = rtc.now();
+            Log.notice(F("DS3231 time %d-%d-%d %d:%d:%d"),
+              rtcnow.year(),rtcnow.month(),rtcnow.day(),
+              rtcnow.hour(),rtcnow.minute(),rtcnow.second());
+          }
+        }
+      }
+
       if (address == 0x76 || address == 0x77) {
         // BME280 or BME680
         #if defined(BME680Bosch)
@@ -1127,6 +1219,18 @@ void setup_readconfig() {
    } else {
      pir_found = false;
    }
+
+   if (root["clock"]) {
+     clock_enabled = root["clock"]["enabled"];
+     clock_timezone = root["clock"]["timezone"];
+     clock_dst = root["clock"]["dst"];
+     clock_enabled = true;
+     hourcolor = root["clock"]["hourcolor"];
+     minutecolor = root["clock"]["minutecolor"];
+     secondcolor = root["clock"]["secondcolor"];
+     clock_topled = root["clock"]["topled"];
+   }
+
 
   f.close();
   SPIFFS.end();
@@ -1853,9 +1957,54 @@ void loop_as3935() {
   }
 }
 
+int rrmap(int in) {
+  in += clock_topled;
+  if (in < 0)
+    return nrofleds + in;
+  else if (in >= nrofleds)
+    return in - nrofleds;
+  else
+    return in;
+}
+
+
+void loop_displaytime() {
+  static unsigned long lastDisplay;
+  if ((millis() - lastDisplay) < 1000)
+    return;
+
+  lastDisplay = millis();
+  rtcnow = rtc.now();
+
+  // hour tick marks
+  for (int i = 0; i < nrofleds; i++) {
+    if (i % (nrofleds / 12) == 0) {
+      setledcolor(i,hourtickcolor,0);
+    } else {
+      setled(i,0,0,0,0);
+    }
+  }
+
+  int hour12 = (rtcnow.hour() > 12) ? (rtcnow.hour()-12) : rtcnow.hour();
+  // 12
+  int hourstart = map(hour12,0,12,0,nrofleds-1);
+  int hourwidth = map(2,0,12,0,nrofleds-1) - map(1,0,12,0,nrofleds-1);
+  float hourfraction = rtcnow.minute() / 60.0;
+  int hourend = hourstart + int((float)hourwidth*hourfraction);
+  setledcolor(rrmap(hourend),hourcolor,0);
+  setledcolor(rrmap(map(rtcnow.minute(),0,59,0,nrofleds-1)),minutecolor,0);
+  setledcolor(rrmap(map(rtcnow.second(),0,59,0,nrofleds-1)),secondcolor,0);
+
+
+  setled(1); // show leds
+}
+
 void loop() {
   // put your main code here, to run repeatedly:
   client.loop();
+
+  if (clock_enabled)
+    loop_displaytime();
 
   if (!client.connected()) {
     now = millis();
