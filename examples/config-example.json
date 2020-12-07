@@ -24,6 +24,16 @@
     "count":1,
     "type":82
   },
+  "clock":{
+    "enabled":1,
+    "timezone":1,
+    "dst":0,
+    "hourcolor":65280,
+    "minutecolor":16711680,
+    "secondcolor":16777215,
+    "hourtickcolor":5,
+    "topled":0
+  },
   "sensors":{
     "as3935":{
       "input":13,
