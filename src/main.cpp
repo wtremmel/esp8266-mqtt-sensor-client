@@ -229,6 +229,8 @@ void publish_as3935();
 void publish_bme280();
 void publish_bme680();
 void publish_si7021();
+void display_temperature(int thisTemp);
+void display_humidity(int thisHum);
 
 
 // LED routines
@@ -476,6 +478,13 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
         Log.notice(F("Brightness: %d"),led.getBrightness());
         led.setBrightness(in[2].toInt());
         Log.notice(F("Brightness: %d"),led.getBrightness());
+      }
+      else if (in[1] == "temperature") {
+        //led temperature 25.3
+        display_temperature(in[2].toInt());
+      }
+      else if (in[1] == "humidity") {
+        display_humidity(in[2].toInt());
       }
     }
     else if (wordcounter == 3) {
@@ -1997,9 +2006,55 @@ int rrmap(int in) {
     return in;
 }
 
+void display_temperature(int minTemp,int maxTemp, int thisTemp) {
+  // not called from loop
+  setallleds(0, 0, 0);
+  int lastLed=0;
+
+  for (int i=minTemp; i <= 0 && i <=thisTemp; i++) {
+    if (i == thisTemp) {
+      setled(rrmap(map(i, minTemp, maxTemp, 0, nrofleds-1)),0,0,254,1);
+    } else {
+      int thisLed = map(i,minTemp,maxTemp,0,nrofleds-1);
+      setled(rrmap(thisLed),0,0,1);
+      if (thisLed-1 > lastLed)
+        setled(rrmap(thisLed-1),0,0,1,1);
+      lastLed=thisLed;
+    }
+    setled(1);
+  }
+  for (int i=1;i<=maxTemp && i<=thisTemp;i++) {
+    if (i == thisTemp) {
+      setled(rrmap(map(i,minTemp,maxTemp,0,nrofleds-1)),254,0,0,1);
+    } else {
+      int thisLed = map(i,minTemp,maxTemp,0,nrofleds-1);
+      setled(rrmap(thisLed),1,0,0,1);
+      if (thisLed-1 > lastLed)
+        setled(rrmap(thisLed-1),1,0,0,1);
+      lastLed = thisLed;
+    }
+    setled(1);
+  }
+}
+
+void display_temperature(int thisTemp) {
+  display_temperature(-10,40,thisTemp);
+}
+
+void display_humidity(int thisHum) {
+  setallleds(0, 0, 0);
+  for (int i=0; i<=thisHum;i++) {
+    if (i == thisHum) {
+      setled(rrmap(map(i,0,100,0,nrofleds-1)),0,100,100,1);
+    } else if (i < thisHum) {
+      setled(rrmap(map(i,0,100,0,nrofleds-1)),0,1,1,1);
+    }
+  }
+}
+
 static unsigned long lastDisplay;
 
-void loop_displaytime() {
+void loop_display_time() {
   if ((millis() - lastDisplay) < 1000)
     return;
 
@@ -2029,7 +2084,7 @@ void loop_displaytime() {
   setled(1); // show leds
 }
 
-bool display_countdown() {
+bool loop_display_countdown() {
   int seconds_left = (countdown_until - millis())/1000;
   if (seconds_left <= 0) {
     countdown_mode = false;
@@ -2053,7 +2108,7 @@ bool display_countdown() {
     }
   } else if ((seconds_left + 15) % 30 < 3) {
     // display time every 30 seconds for 3 seconds
-    loop_displaytime();
+    loop_display_time();
   } else {
     if ((millis() - lastDisplay) < 1000)
       return true;
@@ -2084,7 +2139,7 @@ void loop() {
   client.loop();
 
   if (countdown_mode) {
-    if (!display_countdown()) {
+    if (!loop_display_countdown()) {
       // countdown done
       for (int i=0;i<10;i++) {
         setallleds(255, 0, 0);
@@ -2097,7 +2152,7 @@ void loop() {
   }
 
   else if (clock_enabled)
-    loop_displaytime();
+    loop_display_time();
 
   if (!client.connected()) {
     now = millis();
