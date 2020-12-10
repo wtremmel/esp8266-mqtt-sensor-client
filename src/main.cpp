@@ -645,6 +645,32 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
     }
   }
 
+  if (wordcounter >= 1 && in[0] == F("countdown")) {
+    countdown_mode = true;
+
+    if (wordcounter == 1 and in[1] == "cancel") {
+      countdown_mode = false;
+    }
+    // clock countdown seconds
+    else if (wordcounter == 1) {
+      countdown_until = millis() + in[1].toInt()*1000;
+    }
+    // clock countdown minutes seconds
+    else if (wordcounter == 2) {
+      countdown_until = millis() +
+        in[1].toInt()*60*1000 +
+        in[2].toInt()*1000;
+    }
+    else if (wordcounter == 3) {
+      countdown_until = millis() +
+        in[1].toInt()*60*60*1000 +
+        in[2].toInt()*60*1000 +
+        in[3].toInt()*1000;
+    } else {
+      countdown_mode=false;
+    }
+  }
+
   if (in[0] == F("clock") && rtc_found) {
     if (wordcounter >= 1) {
       if (in[1] == F("enable")) {
@@ -658,6 +684,17 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
         clock_enabled = false;
       }
     }
+    if (wordcounter == 3 && in[1] == F("color")) {
+      if (in[2] == F("hour"))
+        hourcolor = atol(in[3].c_str());
+      if (in[2] == F("minute"))
+        minutecolor = atol(in[3].c_str());
+      if (in[2] == F("second"))
+        secondcolor = atol(in[3].c_str());
+      if (in[2] == F("tick"))
+        hourtickcolor = atol(in[3].c_str());
+
+    }
     if (wordcounter > 0 && in[1] == F("set")) {
       // clock set year month day hour minute second
       if (wordcounter == 7) {
@@ -668,31 +705,6 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
           atoi(in[5].c_str()), // hour
           atoi(in[6].c_str()), // minute
           atoi(in[7].c_str()))); // second
-      }
-    }
-    if (wordcounter >= 2 && in[1] == F("countdown")) {
-      countdown_mode = true;
-
-      if (wordcounter == 2 and in[2] == "cancel") {
-        countdown_mode = false;
-      }
-      // clock countdown seconds
-      else if (wordcounter == 2) {
-        countdown_until = millis() + in[2].toInt()*1000;
-      }
-      // clock countdown minutes seconds
-      else if (wordcounter == 3) {
-        countdown_until = millis() +
-          in[2].toInt()*60*1000 +
-          in[3].toInt()*1000;
-      }
-      else if (wordcounter == 4) {
-        countdown_until = millis() +
-          in[2].toInt()*60*60*1000 +
-          in[3].toInt()*60*1000 +
-          in[4].toInt()*1000;
-      } else {
-        countdown_mode=false;
       }
     }
   }
@@ -2006,6 +2018,53 @@ int rrmap(int in) {
     return in;
 }
 
+uint32_t dimcolor(uint32_t color) {
+  // dims color as much as possible
+  uint8_t
+    r = (uint8_t)(color >> 16),
+    g = (uint8_t)(color >> 8),
+    b = (uint8_t)(color);
+
+  uint8_t smallest = min(r,b);
+  if (smallest == 0)
+    smallest = max(r,b);
+
+  uint8_t sm2 = min(smallest,g);
+  if (sm2 == 0)
+    sm2 = max(smallest,g);
+
+  if (sm2 == 0)
+    return 0;
+
+  return (uint32_t)((r/sm2)<<16) +
+    (uint32_t)((g/sm2)<<8) +
+    (uint32_t)((b/sm2));
+
+}
+
+uint32_t dimcolor(uint32_t color, uint8_t dimby) {
+  // dims only by dimby
+  uint8_t
+    r = (uint8_t)(color >> 16),
+    g = (uint8_t)(color >> 8),
+    b = (uint8_t)(color);
+
+  uint32_t ur = r / dimby,
+    ug = g / dimby,
+    ub = b / dimby;
+
+  if (ur == 0 && r > 0)
+    ur = 1;
+
+  if (ug == 0 && g > 0)
+    ug = 1;
+
+  if (ub == 0 && b > 0)
+    ub = 1;
+
+  return (ur << 16) + (ug << 8) + ub;
+}
+
 void display_temperature(int minTemp,int maxTemp, int thisTemp) {
   // not called from loop
   setallleds(0, 0, 0);
@@ -2052,10 +2111,13 @@ void display_humidity(int thisHum) {
   }
 }
 
-static unsigned long lastDisplay;
+static unsigned long lastDisplay = 0;
 
 void loop_display_time() {
   if ((millis() - lastDisplay) < 1000)
+    return;
+
+  if (!rtc_found)
     return;
 
   lastDisplay = millis();
@@ -2076,10 +2138,32 @@ void loop_display_time() {
   int hourwidth = map(2,0,12,0,nrofleds-1) - map(1,0,12,0,nrofleds-1);
   float hourfraction = rtcnow.minute() / 60.0;
   int hourend = hourstart + int((float)hourwidth*hourfraction);
-  setledcolor(rrmap(hourend),hourcolor,0);
-  setledcolor(rrmap(map(rtcnow.minute(),0,59,0,nrofleds-1)),minutecolor,0);
-  setledcolor(rrmap(map(rtcnow.second(),0,59,0,nrofleds-1)),secondcolor,0);
 
+  setledcolor(rrmap(hourend-2),dimcolor(hourcolor),0);
+  setledcolor(rrmap(hourend-1),dimcolor(hourcolor),0);
+  setledcolor(rrmap(hourend+1),dimcolor(hourcolor),0);
+  setledcolor(rrmap(hourend+2),dimcolor(hourcolor),0);
+
+  setledcolor(
+    rrmap(map(rtcnow.minute(),0,59,0,nrofleds-1)-1),
+    dimcolor(minutecolor),0);
+  setledcolor(
+    rrmap(map(rtcnow.minute(),0,59,0,nrofleds-1)+1),
+    dimcolor(minutecolor),0);
+
+  int hourled = rrmap(hourend),
+    minuteled = rrmap(map(rtcnow.minute(),0,59,0,nrofleds-1)),
+    secondled = rrmap(map(rtcnow.second(),0,59,0,nrofleds-1));
+
+  int mc;
+  if (hourled == minuteled)
+    mc = (hourcolor | minutecolor);
+  else
+    mc = minutecolor;
+
+  setledcolor(hourled,hourcolor,0);
+  setledcolor(minuteled,mc,0);
+  setledcolor(secondled,secondcolor,0);
 
   setled(1); // show leds
 }
@@ -2106,7 +2190,7 @@ bool loop_display_countdown() {
         setled(i,0,0,0,0);
 
     }
-  } else if ((seconds_left + 15) % 30 < 3) {
+  } else if (rtc_found && ((seconds_left + 15) % 30 < 8)) {
     // display time every 30 seconds for 3 seconds
     loop_display_time();
   } else {
