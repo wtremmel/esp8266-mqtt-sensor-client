@@ -22,7 +22,9 @@
   },
   "led":{
     "count":1,
-    "type":82
+    "type":82,
+    "autoBrightness":0,
+    "brightness":255
   },
   "clock":{
     "enabled":1,

@@ -118,6 +118,8 @@ const uint8_t bsec_config_iaq[] = {
 uint8_t nrofleds = 1;
 neoPixelType ledtype = NEO_GRB + NEO_KHZ800;
 bool has_white = false;
+bool led_auto_brightness = false;
+uint8_t ledBrightness = 255;
 
 Adafruit_Si7021 si7021;
 Adafruit_BME280 bme280;
@@ -325,6 +327,15 @@ void setled(byte show) {
   led.show();
 }
 
+void setled_brightness(float lux) {
+  // set led Brighness according to lux value
+  int llux = (lux > 500) ? 500 : (int)lux;
+  uint8_t bri = map(llux, 0, 500, 2, 255);
+  ledBrightness = bri;
+  Log.verbose(F("setled auto brightness %d"),bri);
+  led.setBrightness(bri);
+}
+
 // Debug functions
 void log_config () {
 
@@ -351,7 +362,7 @@ void log_config () {
 }
 
 void write_config () {
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<1024> doc;
   doc["myname"] = Smyname;
   JsonObject display = doc.createNestedObject("display");
   display["flipped"] = Bflipped;
@@ -409,10 +420,11 @@ void write_config () {
     as3935["tunecap"] = as3935_tunecap;
   }
 
-  JsonObject leds;
-  leds = doc.createNestedObject("led");
+  JsonObject leds = doc.createNestedObject("led");
   leds["count"] = nrofleds;
   leds["type"] = ledtype;
+  leds["autoBrightness"] = led_auto_brightness;
+  leds["brightness"] = ledBrightness;
 
   doc["co2alert"] = Bco2alert;
 
@@ -475,9 +487,14 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
     if (wordcounter == 2) {
       // led brightness x
       if (in[1] == "brightness") {
-        Log.notice(F("Brightness: %d"),led.getBrightness());
-        led.setBrightness(in[2].toInt());
-        Log.notice(F("Brightness: %d"),led.getBrightness());
+        if (in[2] == F("auto")) {
+          led_auto_brightness = true;
+        } else {
+          Log.notice(F("Brightness: %d"),led.getBrightness());
+          led.setBrightness(in[2].toInt());
+          Log.notice(F("Brightness: %d"),led.getBrightness());
+          led_auto_brightness = false;
+        }
       }
       else if (in[1] == "temperature") {
         //led temperature 25.3
@@ -1262,6 +1279,10 @@ void setup_readconfig() {
      led.updateType(ledtype);
      has_white = (ledtype >> 6) != ((ledtype >> 4) & 0x03);
    }
+   if((ledBrightness = root["led"]["brightness"])) {
+     led.setBrightness(ledBrightness);
+   }
+   led_auto_brightness = root["led"]["autoBrightness"];
 
    Bco2alert = root["co2alert"];
 
@@ -1797,8 +1818,12 @@ void loop_publish_veml6070() {
 
 void loop_publish_gy49() {
   if (gy49_found) {
-    mqtt_publish(F("light"),(float)gy49.getLux());
-    mqtt_influx(F("light"),(float)gy49.getLux());
+    float lux = gy49.getLux();
+    mqtt_publish(F("light"),lux);
+    mqtt_influx(F("light"),lux);
+    if (led_auto_brightness) {
+      setled_brightness(lux);
+    }
   }
 }
 
