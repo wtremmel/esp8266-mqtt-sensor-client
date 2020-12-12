@@ -1,0 +1,7 @@
+#!/bin/bash
+#
+#
+mosquitto_pub -t clock -h pi3.garf.de -m "clock color hour 8323072"
+mosquitto_pub -t clock -h pi3.garf.de -m "clock color minute 32512"
+mosquitto_pub -t clock -h pi3.garf.de -m "clock color second 8355711"
+mosquitto_pub -t clock -h pi3.garf.de -m "clock color tick 5"

@@ -1,0 +1,20 @@
+#!/usr/bin/perl
+#
+$host = "pi3.garf.de";
+$topic = "/Chattenweg5/Arbeitszimmer/light";
+$clockdevice = "clock";
+$clocktopic = "led brightness";
+$maxlight = 100;
+
+open(IN,"mosquitto_sub -h $host -t $topic |");
+
+while (<IN>) {
+  chomp;
+  my $value = $_;
+  $value = 100 if ($value > 100);
+
+  my $bri = int(($value - 0) * (255 - 2) / (100-0) + 2);
+
+  `mosquitto_pub -h $host -t $clockdevice -m \"$clocktopic $bri\"`;
+  print "$value -> $bri\n";
+}
