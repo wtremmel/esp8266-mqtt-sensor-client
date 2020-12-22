@@ -103,6 +103,7 @@ const uint8_t bsec_config_iaq[] = {
 #include "Adafruit_VL53L0X.h"
 #include "Adafruit_TCS34725.h"
 #include "Adafruit_CCS811.h"
+#include "Adafruit_SGP30.h"
 #include <U8x8lib.h>
 #include <SparkFun_AS3935.h>
 #include <Max44009.h>
@@ -137,6 +138,7 @@ Adafruit_ADS1115 ads1115;
 SparkFun_AS3935 as3935(AS3935_ADDR);
 Adafruit_NeoPixel led = Adafruit_NeoPixel(nrofleds, NEOPIXEL, ledtype);
 Adafruit_TCS34725 tcs = Adafruit_TCS34725();
+Adafruit_SGP30 sgp30;
 Max44009 gy49(0x4a);
 RTC_DS3231 rtc;
 WiFiClient espClient;
@@ -167,6 +169,7 @@ bool bme680_found = false;
 bool tsl2561_found= false;
 bool voltage_found= true;
 bool ccs811_found = false;
+bool sgp30_found =false;
 bool u8x8_found = false;
 bool veml_found = false;
 bool lox_found = false;
@@ -1003,6 +1006,7 @@ void setup_i2c() {
 // 0x4a GY49 or MAX44009 Light Sensor
 // 0x50 PCF8583P
 // 0x57 ATMEL732
+// 0x58 CJMCU-30 CO2 Sensor
 // 0x5a CCS811 Gas Sensor
 // 0x68 DS3231 Clock
 // 0x76 BME280
@@ -1123,6 +1127,18 @@ void setup_i2c() {
 
       if (address == 0x57) {
         // ATMEL732
+      }
+
+      if (address == 0x58) {
+        // CJMCU-30
+        if (sgp30.begin()) {
+          sgp30_found = true;
+          Log.notice(F("SGP30 with serial #%x%x%x  found att 0x%x"),
+          sgp30.serialnumber[0],
+          sgp30.serialnumber[1],
+          sgp30.serialnumber[2],
+            address);
+        }
       }
 
       if (address == 0x5a) {
@@ -1858,6 +1874,19 @@ void loop_publish_ccs811() {
   }
 }
 
+void loop_publish_sgp30() {
+  if (sgp30_found) {
+    if (sgp30.IAQmeasure()) {
+      mqtt_publish(F("CO2"), co2ampel(sgp30.eCO2));
+      mqtt_publish(F("TVOC"), (unsigned int) sgp30.TVOC);
+      mqtt_influx(F("CO2"),co2ampel(sgp30.eCO2));
+      mqtt_influx(F("TVOC"),(unsigned int) sgp30.TVOC);
+    } else {
+      Log.verbose(F("SGP30 measurement failed"));
+    }
+  }
+}
+
 
 void loop_publish_si7021() {
   if (si7021_found) {
@@ -2305,6 +2334,8 @@ void loop() {
     client.loop();
     loop_publish_ccs811();
     client.loop();
+    loop_publish_sgp30();
+    client.loop();
     last_transmission = millis();
   }
   client.loop();
@@ -2364,6 +2395,10 @@ void loop() {
       case DISPLAY_CO2:
           if (ccs811_found && ccs.available()) {
             snprintf(s, 9, "%dppm", ccs.geteCO2());
+            u8x8.clearDisplay();
+            u8x8.draw2x2String(1, 3, s);
+          } else if (sgp30_found && sgp30.IAQmeasure()) {
+            snprintf(s, 9, "%dppm", sgp30.eCO2);
             u8x8.clearDisplay();
             u8x8.draw2x2String(1, 3, s);
           }
