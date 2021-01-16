@@ -108,6 +108,7 @@ const uint8_t bsec_config_iaq[] = {
 #include <SparkFun_AS3935.h>
 #include <Max44009.h>
 #include "RTClib.h"
+#include "HX711.h"
 
 
 // Global defines
@@ -139,6 +140,11 @@ SparkFun_AS3935 as3935(AS3935_ADDR);
 Adafruit_NeoPixel led = Adafruit_NeoPixel(nrofleds, NEOPIXEL, ledtype);
 Adafruit_TCS34725 tcs = Adafruit_TCS34725();
 Adafruit_SGP30 sgp30;
+
+HX711 hx711;
+int hx711_sck=0;
+int hx711_dout=0;
+
 Max44009 gy49(0x4a);
 RTC_DS3231 rtc;
 WiFiClient espClient;
@@ -184,6 +190,7 @@ bool gy49_found = false;
 bool rtc_found = false;
 bool rtc_timeok = false;
 bool clock_enabled = false;
+bool hx711_found = false;
 
 bool color_watch = false;
 
@@ -234,6 +241,7 @@ void publish_as3935();
 void publish_bme280();
 void publish_bme680();
 void publish_si7021();
+void publish_hx711();
 void display_temperature(int thisTemp);
 void display_humidity(int thisHum);
 
@@ -421,6 +429,14 @@ void write_config () {
     JsonObject as3935 = sensors.createNestedObject("as3935");
     as3935["input"] = as3935_input;
     as3935["tunecap"] = as3935_tunecap;
+  }
+
+  if (hx711_found) {
+    JsonObject hx711object = sensors.createNestedObject("hx711");
+    hx711object["dout"]=hx711_dout;
+    hx711object["sck"]=hx711_sck;
+    hx711object["scale"]=hx711.get_scale();
+    hx711object["offset"]=hx711.get_offset();
   }
 
   JsonObject leds = doc.createNestedObject("led");
@@ -650,6 +666,16 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
           #endif
           publish_bme680();
         }
+      }
+
+      if (hx711_found and in[1] == "hx711") {
+        if (wordcounter == 3 && in[2] == "offset") {
+          hx711.set_offset(atol(in[3].c_str()));
+        }
+        if (wordcounter == 3 && in[2] == "scale") {
+          hx711.set_scale(atof(in[3].c_str()));
+        }
+        publish_hx711();
       }
 
 
@@ -1319,6 +1345,21 @@ void setup_readconfig() {
      clock_topled = root["clock"]["topled"];
    }
 
+   if (root["sensors"]["hx711"]) {
+     hx711_dout = root["sensors"]["hx711"]["dout"];
+     hx711_sck = root["sensors"]["hx711"]["sck"];
+     Log.notice(F("hx711 cofigured dout=%d sck=%d"), hx711_dout,hx711_sck);
+     hx711.begin(hx711_dout, hx711_sck);
+     if (hx711.wait_ready_timeout(1000)) {
+       hx711_found = true;
+       Log.notice(F("hx711 found"));
+       hx711.set_offset((long) root["sensors"]["hx711"]["offset"]);
+       hx711.set_scale((float) root["sensors"]["hx711"]["scale"]);
+     } else {
+       Log.error(F("hx711 not found"));
+     }
+   }
+
 
   f.close();
   SPIFFS.end();
@@ -1720,6 +1761,16 @@ void publish_si7021() {
   }
 }
 
+void publish_hx711() {
+  if (hx711_found) {
+    mqtt_publish(F("hx711/scale"), (float)hx711.get_scale());
+    mqtt_publish(F("hx711/offset"), (float)hx711.get_offset());
+    mqtt_publish(F("hx711/read"), (float)hx711.read());
+    mqtt_publish(F("hx711/value"), (float)hx711.get_value());
+    mqtt_publish(F("hx711/units"), (float)hx711.get_units());
+  }
+}
+
 void loop_publish_bme280() {
   if (bme280_found) {
     mqtt_publish(F("temperature"), bme280.readTemperature());
@@ -1921,6 +1972,14 @@ void loop_publish_tcs34725() {
 
     setled(r,g,b);
     Log.verbose(F("TCS Color adj: R=%d G=%d B=%d C=%d"),r,g,b,c);
+  }
+}
+
+void loop_publish_hx711() {
+  if (hx711_found) {
+    float w = hx711.get_units(5);
+    mqtt_publish(F("weight"), w);
+    mqtt_influx(F("weight"), w);
   }
 }
 
@@ -2335,6 +2394,8 @@ void loop() {
     loop_publish_ccs811();
     client.loop();
     loop_publish_sgp30();
+    client.loop();
+    loop_publish_hx711();
     client.loop();
     last_transmission = millis();
   }
