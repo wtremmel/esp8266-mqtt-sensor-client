@@ -52,6 +52,12 @@
     },
     "pir":{
       "pin":12
+    },
+    "hx711":{
+      "dout":13,
+      "sck":12,
+      "scale":1.0,
+      "offset":0
     }
   },
   "co2alert":true
