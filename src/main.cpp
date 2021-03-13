@@ -109,7 +109,7 @@ const uint8_t bsec_config_iaq[] = {
 #include <Max44009.h>
 #include "RTClib.h"
 #include "HX711.h"
-
+#include <MD_MAX72xx.h>
 
 // Global defines
 #define NEOPIXEL 14 //D5
@@ -669,11 +669,25 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)  {
       }
 
       if (hx711_found and in[1] == "hx711") {
+/*
+sensors hx711 1
+sensors hx711 tara
+Place a known weight on the scale
+sensors hx711
+Divide the result from units in step 3 to your known weight.
+You should get about the parameter you need to pass to scale
+sensors hx711 scale xxx.xxx
+Adjust the parameter in step 4 until you get an accurate reading.
+*/
+
         if (wordcounter == 3 && in[2] == "offset") {
           hx711.set_offset(atol(in[3].c_str()));
         }
         if (wordcounter == 3 && in[2] == "scale") {
           hx711.set_scale(atof(in[3].c_str()));
+        }
+        if (wordcounter == 2 && in[2] == "tara") {
+          hx711.tare();
         }
         publish_hx711();
       }
@@ -1035,6 +1049,7 @@ void setup_i2c() {
 // 0x58 CJMCU-30 CO2 Sensor
 // 0x5a CCS811 Gas Sensor
 // 0x68 DS3231 Clock
+// 0x75 Filament Sensor
 // 0x76 BME280
 // 0x77 BME680 (also BMP180)
 
@@ -1197,6 +1212,10 @@ void setup_i2c() {
               rtcnow.hour(),rtcnow.minute(),rtcnow.second());
           }
         }
+      }
+
+      if (address == 0x75) {
+        // Filament sensor
       }
 
       if (address == 0x76 || address == 0x77) {
@@ -1766,8 +1785,8 @@ void publish_hx711() {
     mqtt_publish(F("hx711/scale"), (float)hx711.get_scale());
     mqtt_publish(F("hx711/offset"), (float)hx711.get_offset());
     mqtt_publish(F("hx711/read"), (float)hx711.read());
-    mqtt_publish(F("hx711/value"), (float)hx711.get_value());
-    mqtt_publish(F("hx711/units"), (float)hx711.get_units());
+    mqtt_publish(F("hx711/value"), (float)hx711.get_value(10));
+    mqtt_publish(F("hx711/units"), (float)hx711.get_units(10));
   }
 }
 
@@ -1977,7 +1996,7 @@ void loop_publish_tcs34725() {
 
 void loop_publish_hx711() {
   if (hx711_found) {
-    float w = hx711.get_units(5);
+    float w = hx711.get_units(10);
     mqtt_publish(F("weight"), w);
     mqtt_influx(F("weight"), w);
   }
