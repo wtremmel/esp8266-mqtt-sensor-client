@@ -18,7 +18,10 @@
   "display":{
     "flipped":false,
     "brightness":1,
-    "content":7
+    "content":7,
+    // "type":"u8x8",
+    "type":"max72xx",
+    "panels":4
   },
   "led":{
     "count":1,
